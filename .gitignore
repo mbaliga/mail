@@ -1,0 +1,19 @@
+# Gradle / build
+.gradle/
+build/
+**/build/
+!**/src/**/build/
+local.properties
+*.iml
+.idea/
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+# Signing material and secrets never enter the repo
+*.jks
+*.keystore
+secrets.properties
+# OS
+.DS_Store
+Thumbs.db
