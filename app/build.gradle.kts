@@ -25,7 +25,7 @@ dependencies {
     implementation(libs.mlkit.language.id)
     implementation(libs.mlkit.translate)
     implementation(libs.mlkit.entity.extraction)
-    implementation(libs.litertlm.android)
+    implementation(libs.mediapipe.tasks.genai)
     implementation(libs.appauth)
     implementation(libs.play.services.auth)
     implementation(libs.androidx.work.runtime.ktx)

@@ -27,8 +27,14 @@ mlkitGenaiRewriting = "1.0.0-beta1"
 mlkitLanguageId = "17.0.6"
 mlkitTranslate = "17.0.3"
 mlkitEntityExtraction = "16.0.0-beta6"
-# LiteRT-LM — a local Gemma model file for devices that have no AICore.
-litertlm = "0.19.0"
+# LiteRT-LM is not used: every release is built with Kotlin 2.3+ metadata and Java 21 bytecode, which this
+# build's Kotlin 2.1 (pinned by the constellation) cannot read. MediaPipe's LLM Inference API (Java 8,
+# no Kotlin metadata) runs the same local Gemma model files instead.
+# The official Anthropic SDK (Kotlin uses the Java SDK). 3.4.0: Java 8 bytecode, Kotlin metadata 2.0
+# (readable by this build's Kotlin 2.1), kotlin-stdlib 1.9, OkHttp 4.12 — the same OkHttp we use.
+anthropic = "3.4.0"
+mediapipeGenai = "0.10.35"
+coroutinesGuava = "1.10.1"
 junit = "4.13.2"
 
 [libraries]
@@ -68,7 +74,9 @@ mlkit-genai-rewriting = { group = "com.google.mlkit", name = "genai-rewriting", 
 mlkit-language-id = { group = "com.google.mlkit", name = "language-id", version.ref = "mlkitLanguageId" }
 mlkit-translate = { group = "com.google.mlkit", name = "translate", version.ref = "mlkitTranslate" }
 mlkit-entity-extraction = { group = "com.google.mlkit", name = "entity-extraction", version.ref = "mlkitEntityExtraction" }
-litertlm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-android", version.ref = "litertlm" }
+anthropic-java = { group = "com.anthropic", name = "anthropic-java", version.ref = "anthropic" }
+mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipeGenai" }
+kotlinx-coroutines-guava = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-guava", version.ref = "coroutinesGuava" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]
