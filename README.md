@@ -51,8 +51,7 @@ and a two-pane layout on tablets and foldables.
 |---|---|---|
 | **Heuristics** | everywhere, always | categories, OTP codes, one-line summaries, priority, schema.org cards (flights, orders, parcels) |
 | **Gemini Nano** (ML Kit GenAI / AICore) | on the phone, on devices that have it | summaries in the "who wants what" voice, categories when unsure, quick replies, drafts, rewrite/proofread, dates & tasks, the spoken briefing |
-| **A local Gemma file** (MediaPipe LLM Inference) | on the phone, any recent device | the same, for phones without AICore — pick a `.task` file in Settings |
-| **ML Kit Translation** | on the phone | translating messages |
+| **A downloaded Gemma model** (MediaPipe LLM Inference) | on the phone, any recent device | the same, for phones without AICore. Not bundled: pick it from the catalogue in Settings → Intelligence and it downloads on demand (resumable, into private storage, deletable). Gemma is gated on Hugging Face, so the catalogue asks for a free token and a licence accepted on the model's page. A `.task` file you already have also works. |
 | **Your cloud key** (BYOK) | the provider you choose | only the tasks you allow |
 
 Cloud providers: Anthropic (Claude), OpenAI, Google Gemini, Mistral, Groq, OpenRouter, DeepSeek,
@@ -156,9 +155,10 @@ Application and Activity; CI uploads the screens and the debug APK. Robolectric 
 runtime from Maven Central on first run; behind a proxy or mirror, set `ROBOLECTRIC_REPO` to a Maven
 repository URL that serves it.
 
-Most of the APK is the on-device models' native code (MediaPipe's LLM runtime and ML Kit's
-translator, for two ABIs). `./gradlew :app:bundleRelease` builds an App Bundle, from which a store
-delivers only the phone's own ABI.
+No model weights are in the APK. What remains of its size (about 66 MB, arm64 only; debug builds
+also carry x86_64 for emulators) is the MediaPipe runtime (27 MB), bundled SQLite and the code.
+Translation goes through whichever model is available (downloaded, Gemini Nano, or your cloud key)
+rather than ML Kit Translate, whose 17 MB native library cannot be downloaded separately.
 
 **Why these versions.** The constellation pins Kotlin 2.1, which fixes two choices: ML Kit's Prompt
 API is at `1.0.0-beta2` (later betas need Kotlin 2.3+), and local models run on MediaPipe's LLM

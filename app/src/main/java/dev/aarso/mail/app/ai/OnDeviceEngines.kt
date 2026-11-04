@@ -8,7 +8,6 @@ package dev.aarso.mail.app.ai
 import android.content.Context
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
-import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.common.GenAiException
@@ -25,10 +24,6 @@ import com.google.mlkit.genai.rewriting.RewritingRequest
 import com.google.mlkit.genai.summarization.Summarization
 import com.google.mlkit.genai.summarization.SummarizationRequest
 import com.google.mlkit.genai.summarization.SummarizerOptions
-import com.google.mlkit.nl.languageid.LanguageIdentification
-import com.google.mlkit.nl.translate.TranslateLanguage
-import com.google.mlkit.nl.translate.Translation
-import com.google.mlkit.nl.translate.TranslatorOptions
 import dev.aarso.mail.ai.AiTask
 import dev.aarso.mail.ai.Availability
 import dev.aarso.mail.ai.EngineException
@@ -45,10 +40,8 @@ import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.Locale
 
 /**
  * Gemini Nano through AICore — the model that ships with the phone, on the devices that have it.
@@ -248,34 +241,5 @@ class LocalModelEngine(private val context: Context, private val path: () -> Str
 
     fun close() {
         llm?.close(); llm = null; loaded = null
-    }
-}
-
-/** ML Kit's on-device translator: works on every phone, needs a one-time ~30 MB language pack. */
-class OnDeviceTranslator {
-    data class Translated(val sourceLanguage: String, val text: String)
-
-    suspend fun identify(text: String): String? = runCatching {
-        LanguageIdentification.getClient().identifyLanguage(text.take(2000)).await().takeIf { it != "und" }
-    }.getOrNull()
-
-    suspend fun translate(text: String, target: String = Locale.getDefault().language): Translated? {
-        val source = identify(text) ?: return null
-        val s = TranslateLanguage.fromLanguageTag(source) ?: return null
-        val t = TranslateLanguage.fromLanguageTag(target) ?: return null
-        if (s == t) return null
-        val translator = Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(s).setTargetLanguage(t).build())
-        return try {
-            translator.downloadModelIfNeeded(DownloadConditions.Builder().build()).await()
-            // Paragraph by paragraph keeps the message's shape (and stays within the model's input).
-            val out = text.split('\n').map { line -> if (line.isBlank()) line else translator.translate(line).await() }
-            Translated(source, out.joinToString("\n"))
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Exception) {
-            null
-        } finally {
-            translator.close()
-        }
     }
 }

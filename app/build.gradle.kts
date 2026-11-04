@@ -34,7 +34,7 @@ android {
         // AppAuth's redirect receiver (Microsoft sign-in) listens on this scheme.
         manifestPlaceholders["appAuthRedirectScheme"] = "dev.aarso.mail"
         buildConfigField("String", "MICROSOFT_CLIENT_ID", "\"${secretProp("MICROSOFT_CLIENT_ID")}\"")
-        // Native libraries (bundled SQLite, MediaPipe) only for the ABIs phones and emulators run.
+        // Debug builds also carry x86_64 so emulators work; release is phones only (arm64).
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
@@ -86,6 +86,13 @@ android {
 
 kotlin { jvmToolchain(17) }
 
+// Release is for phones: leave the emulator ABI's native libraries (MediaPipe alone is 30 MB) out.
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.packaging.jniLibs.excludes.add("**/x86_64/**")
+    }
+}
+
 dependencies {
     implementation(project(":mail-ai"))
 
@@ -126,12 +133,11 @@ dependencies {
     implementation(libs.mlkit.genai.summarization)
     implementation(libs.mlkit.genai.proofreading)
     implementation(libs.mlkit.genai.rewriting)
-    implementation(libs.mlkit.language.id)
-    implementation(libs.mlkit.translate)
     implementation(libs.mediapipe.tasks.genai)
 
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
+    testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.roborazzi)
     testImplementation(libs.roborazzi.compose)
     testImplementation(libs.roborazzi.junit)

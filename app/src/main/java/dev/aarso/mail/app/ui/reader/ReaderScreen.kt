@@ -299,10 +299,8 @@ fun ReaderContent(h: MessageHeader, onDone: () -> Unit, onNavigate: (Int) -> Uni
                     if (translated != null) translated = null else scope.launch {
                         working = "translate"
                         val text = body?.text ?: body?.html?.let { HtmlText.toText(it) } ?: h.preview
-                        val local = g.translator.translate(text)
-                        translated = if (local != null) "Translated on this phone from ${java.util.Locale.forLanguageTag(local.sourceLanguage).displayLanguage}" to local.text
-                        else g.ai.translate(text, java.util.Locale.getDefault().displayLanguage)?.let { "Translated by ${it.engineLabel}" to it.value }
-                        if (translated == null) app.say("Already in your language, or no translator is available")
+                        translated = g.ai.translate(text, java.util.Locale.getDefault().displayLanguage)?.let { "Translated by ${it.engineLabel}" to it.value }
+                        if (translated == null) app.say("No model can translate right now — download one in Settings → Intelligence")
                         working = null
                     }
                 })

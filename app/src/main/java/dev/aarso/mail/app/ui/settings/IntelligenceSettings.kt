@@ -114,39 +114,78 @@ fun IntelligenceSettings() {
     }
     Hairline()
 
-    // ---- a local model file ----
-    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        ProvenanceMark(true, working = copying)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text("Local model file", style = Type.body.copy(fontWeight = FontWeight.Medium))
-            Text(s.localModelPath?.let { File(it).name } ?: "For phones without Gemini Nano: a Gemma .task file (e.g. Gemma 3 1B int4)",
-                style = Type.small.copy(color = Palette.SheetInkDim))
-        }
-        if (s.localModelPath != null) TextAction("Remove", Palette.Danger, {
-            val p = s.localModelPath
-            g.localModel.close()
-            g.updateSettings { it.copy(localModelPath = null) }
-            p?.let { runCatching { File(it).delete() } }
-        }) else TextAction(if (copying) "Copying…" else "Choose", Palette.Navy, {
-            if (copying) return@TextAction
-            scope.launch {
-                val uri = bridge.pickDocuments(arrayOf("*/*"), multiple = false).firstOrNull() ?: return@launch
-                copying = true
-                val path = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val name = g.files.describe(uri).fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
-                        val dir = File(g.context.filesDir, "models").apply { mkdirs() }
-                        val out = File(dir, name)
-                        g.context.contentResolver.openInputStream(uri)!!.use { input -> out.outputStream().use { input.copyTo(it, 1 shl 20) } }
-                        out.absolutePath
-                    }.getOrNull()
+    // ---- the catalogue: models you can download to this phone, on demand ----
+    val downloads by g.models.state.collectAsState()
+    var token by remember { mutableStateOf("") }
+    var haveToken by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { haveToken = g.models.token() != null }
+    Text("Models you can download", style = Type.body.copy(fontWeight = FontWeight.Medium), modifier = Modifier.padding(top = 14.dp))
+    Text("Not part of the app. Each one is fetched when you ask, kept in the app's private storage, and removed with Delete.", style = Type.small.copy(color = Palette.SheetInkDim))
+    for (m in dev.aarso.mail.app.ai.ModelCatalog.all) {
+        val st = downloads[m.id]
+        val installed = g.models.installed(m)
+        val inUse = s.localModelPath == g.models.file(m).absolutePath
+        Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ProvenanceMark(true, working = st is dev.aarso.mail.app.ai.DownloadState.Running)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(m.name, style = Type.body.copy(fontWeight = FontWeight.Medium))
+                    Text(
+                        when {
+                            st is dev.aarso.mail.app.ai.DownloadState.Running -> "${st.done / 1_000_000} of ${st.total / 1_000_000} MB"
+                            installed -> if (inUse) "On this phone · in use" else "On this phone"
+                            else -> "About ${m.approxBytes / 1_000_000} MB · download on Wi-Fi"
+                        },
+                        style = Type.small.copy(color = Palette.SheetInkDim),
+                    )
                 }
-                copying = false
-                if (path == null) app.say("Couldn't read that file") else { g.updateSettings { it.copy(localModelPath = path) }; app.say("Model ready") }
+                when {
+                    st is dev.aarso.mail.app.ai.DownloadState.Running -> Unit
+                    installed && !inUse -> TextAction("Use", Palette.Navy, { g.updateSettings { it.copy(localModelPath = g.models.file(m).absolutePath) } })
+                    installed -> TextAction("Delete", Palette.Danger, { g.localModel.close(); g.updateSettings { it.copy(localModelPath = null) }; g.models.delete(m) })
+                    else -> TextAction(if (st is dev.aarso.mail.app.ai.DownloadState.Failed) "Retry" else "Download", Palette.Navy, {
+                        // App scope, not the screen's: leaving Settings must not cancel a 500 MB download.
+                        g.scope.launch {
+                            val f = g.models.download(m)
+                            if (f != null) { g.updateSettings { it.copy(localModelPath = f.absolutePath) }; app.say("${m.name} is ready") }
+                        }
+                    })
+                }
+                if (installed && inUse) Unit else if (installed) TextAction("Delete", Palette.Danger, { g.models.delete(m) })
             }
-        })
+            Text(m.note, style = Type.small, modifier = Modifier.padding(top = 4.dp))
+            (st as? dev.aarso.mail.app.ai.DownloadState.Failed)?.let { Text(it.message, style = Type.small.copy(color = Palette.Danger), modifier = Modifier.padding(top = 4.dp)) }
+            if (m.needsToken && !installed) {
+                Text(if (haveToken) "Hugging Face token saved." else "Needs a free Hugging Face token, and the licence accepted on the model's page.", style = Type.small.copy(color = Palette.SheetInkDim), modifier = Modifier.padding(top = 6.dp))
+                m.licenseUrl?.let { url -> TextAction("Open the model page", Palette.Navy, { bridge.launch(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }) }
+                LineField(token, { token = it }, if (haveToken) "Replace token" else "Hugging Face token (hf_…)",
+                    visualTransformation = PasswordVisualTransformation(), trailing = {
+                        if (token.isNotBlank()) TextAction("Save", Palette.Navy, { scope.launch { g.models.setToken(token); token = ""; haveToken = true } })
+                    })
+            }
+        }
+        Hairline()
     }
+    Text("Models already on this phone as a .task file also work:", style = Type.small.copy(color = Palette.SheetInkDim), modifier = Modifier.padding(top = 8.dp))
+    TextAction(if (copying) "Copying…" else "Choose a model file", Palette.Navy, {
+        if (copying) return@TextAction
+        scope.launch {
+            val uri = bridge.pickDocuments(arrayOf("*/*"), multiple = false).firstOrNull() ?: return@launch
+            copying = true
+            val path = withContext(Dispatchers.IO) {
+                runCatching {
+                    val name = g.files.describe(uri).fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                    val dir = File(g.context.filesDir, "models").apply { mkdirs() }
+                    val out = File(dir, name)
+                    g.context.contentResolver.openInputStream(uri)!!.use { input -> out.outputStream().use { input.copyTo(it, 1 shl 20) } }
+                    out.absolutePath
+                }.getOrNull()
+            }
+            copying = false
+            if (path == null) app.say("Couldn't read that file") else { g.updateSettings { it.copy(localModelPath = path) }; app.say("Model ready") }
+        }
+    })
     Hairline()
 
     // ---- cloud ----
