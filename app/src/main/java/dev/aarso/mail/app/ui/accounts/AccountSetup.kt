@@ -152,8 +152,10 @@ fun AccountSetupScreen(reauthAccountId: Long?, onDone: () -> Unit) {
         error = null
         try {
             g.connector.verify(account)
+            val first = g.accountsNow().isEmpty()
             val saved = g.store.saveAccount(account)
             g.updateSettings { it.copy(onboarded = true) }
+            if (first) bridge.requestNotifications()
             busy = "Fetching your mail"
             g.scope.launch { g.sync.sync(saved, inboxOnly = true); g.sync.sync(saved) }
             Work.syncNow(g.context, saved.id)
@@ -168,7 +170,11 @@ fun AccountSetupScreen(reauthAccountId: Long?, onDone: () -> Unit) {
         } catch (e: Exception) {
             error = e.message ?: "Couldn't connect"
         } finally {
-            if (busy != "Fetching your mail") busy = null
+            if (busy != "Fetching your mail") {
+                busy = null
+                // A sign-in that didn't work leaves nothing sealed behind (re-auth keeps its own key).
+                if (existing == null) runCatching { g.secrets.delete(account.secret) }
+            }
         }
     }
 

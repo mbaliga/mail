@@ -47,6 +47,8 @@ interface ActivityBridge {
     suspend fun pickDocuments(types: Array<String>, multiple: Boolean): List<Uri>
     suspend fun createDocument(name: String, mime: String): Uri?
     fun launch(intent: Intent)
+    /** Ask for POST_NOTIFICATIONS (Android 13+) — once there is mail to notify about. */
+    fun requestNotifications()
 }
 
 val LocalBridge = staticCompositionLocalOf<ActivityBridge> { error("No ActivityBridge") }

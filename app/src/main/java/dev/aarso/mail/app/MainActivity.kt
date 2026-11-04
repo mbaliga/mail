@@ -82,6 +82,12 @@ class MainActivity : ComponentActivity(), ActivityBridge {
         return d.await()
     }
 
+    override fun requestNotifications() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
     override fun launch(intent: Intent) {
         runCatching { startActivity(intent) }.onFailure { state.say("No app can open that") }
     }
@@ -109,9 +115,7 @@ class MainActivity : ComponentActivity(), ActivityBridge {
                 }
             }
         }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED && graph.accountsNow().isNotEmpty()) {
-            notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
+        if (graph.accountsNow().isNotEmpty()) requestNotifications()
     }
 
     override fun onNewIntent(intent: Intent) {

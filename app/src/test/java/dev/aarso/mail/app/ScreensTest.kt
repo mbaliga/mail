@@ -145,6 +145,7 @@ class ScreensTest {
             override suspend fun pickDocuments(types: Array<String>, multiple: Boolean) = emptyList<Uri>()
             override suspend fun createDocument(name: String, mime: String): Uri? = null
             override fun launch(intent: Intent) {}
+            override fun requestNotifications() {}
         }
         rule.setContent {
             MailTheme { CompositionLocalProvider(LocalApp provides state, LocalBridge provides bridge) { content() } }
