@@ -441,7 +441,7 @@ fun countPhrase(n: Int, one: String, many: String = one + "s") = if (n == 1) "1 
 
 /** "298 new mail" with the count in the count colour. */
 fun countLine(n: Int, rest: String) = buildAnnotatedString {
-    withStyle(SpanStyle(color = Palette.Count)) { append("%,d".format(n)) }
+    withStyle(SpanStyle(color = Palette.Count)) { append(if (n == 0) "no" else "%,d".format(n)) }
     append(" ")
     append(rest)
 }

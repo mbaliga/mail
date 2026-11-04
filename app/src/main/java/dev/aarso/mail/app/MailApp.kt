@@ -4,7 +4,7 @@ import android.app.Application
 import dev.aarso.crashrecovery.CrashRecovery
 import dev.aarso.mail.app.platform.Work
 
-class MailApp : Application() {
+open class MailApp : Application() {
 
     lateinit var graph: AppGraph
         private set
