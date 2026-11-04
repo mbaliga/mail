@@ -151,8 +151,14 @@ git submodule update --init --recursive
 ```
 
 JDK 17 and an Android SDK with platform 36 are needed. `:app:testDebugUnitTest` also renders every
-main screen on the JVM (Robolectric + Roborazzi) into `app/build/screens/`; CI uploads those and the
-debug APK.
+main screen on the JVM (Robolectric + Roborazzi) into `app/build/screens/` and boots the real
+Application and Activity; CI uploads the screens and the debug APK. Robolectric downloads its Android
+runtime from Maven Central on first run; behind a proxy or mirror, set `ROBOLECTRIC_REPO` to a Maven
+repository URL that serves it.
+
+Most of the APK is the on-device models' native code (MediaPipe's LLM runtime and ML Kit's
+translator, for two ABIs). `./gradlew :app:bundleRelease` builds an App Bundle, from which a store
+delivers only the phone's own ABI.
 
 **Why these versions.** The constellation pins Kotlin 2.1, which fixes two choices: ML Kit's Prompt
 API is at `1.0.0-beta2` (later betas need Kotlin 2.3+), and local models run on MediaPipe's LLM
