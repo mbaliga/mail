@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Attachments handed to other apps (open, share, forward) are written under the cache and
+     served from here; nothing outside the cache directory is ever exposed. -->
+<paths>
+    <cache-path name="cache" path="." />
+</paths>
