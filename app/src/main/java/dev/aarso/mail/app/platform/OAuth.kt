@@ -165,7 +165,7 @@ class AndroidTokenProvider(
 
     companion object {
         const val GMAIL_SCOPE = "https://mail.google.com/"
-        const val MS_REDIRECT = "dev.aarso.mail://oauth2redirect"
+        const val MS_REDIRECT = "com.asoc.youvegotmail://oauth2redirect"
         val MS_SCOPES = listOf(
             "offline_access", "openid", "email", "profile",
             "https://outlook.office.com/IMAP.AccessAsUser.All",

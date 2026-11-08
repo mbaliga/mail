@@ -26,13 +26,13 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "dev.aarso.mail"
+        applicationId = "com.asoc.youvegotmail"
         minSdk = 31
         targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
         // AppAuth's redirect receiver (Microsoft sign-in) listens on this scheme.
-        manifestPlaceholders["appAuthRedirectScheme"] = "dev.aarso.mail"
+        manifestPlaceholders["appAuthRedirectScheme"] = "com.asoc.youvegotmail"
         buildConfigField("String", "MICROSOFT_CLIENT_ID", "\"${secretProp("MICROSOFT_CLIENT_ID")}\"")
         // Debug builds also carry x86_64 so emulators work; release is phones only (arm64).
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
