@@ -117,7 +117,7 @@ secret and no backend. It needs the app registered once in a Google Cloud projec
 
 1. Create a project at console.cloud.google.com, enable the **Gmail API**, and configure the OAuth
    consent screen with the scope `https://mail.google.com/`.
-2. Create an **OAuth client ID** of type *Android* with package `dev.aarso.mail` and the SHA-1 of
+2. Create an **OAuth client ID** of type *Android* with package `com.asoc.youvegotmail` and the SHA-1 of
    your signing key (`./gradlew :app:signingReport`).
 
 Until then, Gmail works with an app password (Google Account → Security → 2-Step Verification →
@@ -125,7 +125,7 @@ App passwords).
 
 **Microsoft (Outlook.com, Microsoft 365)** uses OAuth with PKCE (AppAuth). Register an app in
 Entra ID (portal.azure.com → App registrations) as a public client with redirect URI
-`dev.aarso.mail://oauth2redirect` and the delegated permissions `IMAP.AccessAsUser.All`,
+`com.asoc.youvegotmail://oauth2redirect` and the delegated permissions `IMAP.AccessAsUser.All`,
 `SMTP.Send` and `offline_access`, then put its client id in `local.properties`:
 
 ```
