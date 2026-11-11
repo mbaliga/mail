@@ -11,6 +11,7 @@ import dev.aarso.mail.ai.TldrUpgrader
 import dev.aarso.mail.ai.UsageLedger
 import dev.aarso.mail.app.ai.GeminiNanoEngine
 import dev.aarso.mail.app.ai.LocalModelEngine
+import dev.aarso.mail.app.ai.LocalRuntime
 import dev.aarso.mail.app.ai.ModelDownloads
 import dev.aarso.mail.app.platform.AndroidTokenProvider
 import dev.aarso.mail.app.platform.Files
@@ -105,7 +106,8 @@ class AppGraph(val context: Context) {
     // ---- intelligence ----
 
     val nano = GeminiNanoEngine(context)
-    val localModel = LocalModelEngine(context) { settings.value.localModelPath }
+    val runtime = LocalRuntime(context)
+    val localModel = LocalModelEngine(context, runtime) { settings.value.localModelPath }
     val models = ModelDownloads(java.io.File(context.filesDir, "models"), http, secrets)
 
     /** API keys, unsealed once and held in memory while the process lives (never written in clear). */

@@ -121,6 +121,9 @@ fun IntelligenceSettings() {
     androidx.compose.runtime.LaunchedEffect(Unit) { haveToken = g.models.token() != null }
     Text("Models you can download", style = Type.body.copy(fontWeight = FontWeight.Medium), modifier = Modifier.padding(top = 14.dp))
     Text("Not part of the app. Each one is fetched when you ask, kept in the app's private storage, and removed with Delete.", style = Type.small.copy(color = Palette.SheetInkDim))
+    val runtimeStatus by g.runtime.status.collectAsState()
+    runtimeStatus?.let { Text(it, style = Type.small.copy(color = Palette.SheetInkDim), modifier = Modifier.padding(top = 6.dp)) }
+    if (g.runtime.delivered && !g.runtime.present) Text("Running a downloaded model needs a small add-on (about ${dev.aarso.mail.app.ai.LocalRuntime.APPROX_BYTES / 1_000_000} MB) that Google Play installs the first time you download one.", style = Type.small.copy(color = Palette.SheetInkDim), modifier = Modifier.padding(top = 4.dp))
     for (m in dev.aarso.mail.app.ai.ModelCatalog.all) {
         val st = downloads[m.id]
         val installed = g.models.installed(m)
@@ -147,6 +150,7 @@ fun IntelligenceSettings() {
                     else -> TextAction(if (st is dev.aarso.mail.app.ai.DownloadState.Failed) "Retry" else "Download", Palette.Navy, {
                         // App scope, not the screen's: leaving Settings must not cancel a 500 MB download.
                         g.scope.launch {
+                            if (!g.runtime.ensure()) { app.say("Couldn't install the on-device runtime"); return@launch }
                             val f = g.models.download(m)
                             if (f != null) { g.updateSettings { it.copy(localModelPath = f.absolutePath) }; app.say("${m.name} is ready") }
                         }

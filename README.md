@@ -93,6 +93,8 @@ answer is retried on a fallback model by the API rather than failing.
   intel/      heuristic categoriser, summariser, OTP extractor, structured data
   digest/     the home sentence and its tabs
 :mail-ai     pure JVM — the intelligence router, prompts, BYOK engines, redaction, budget
+  :ondevice-runtime  Android library: the MediaPipe-backed local model engine (only place MediaPipe is used)
+  :ondevice          Play on-demand module that carries :ondevice-runtime (with -PsplitOnDevice=true)
 :app         Android: Compose UI in Hyle's material language on cell-shell's spatial shell,
              WorkManager jobs, push service, notifications, Keystore, OAuth, on-device engines
 ```
@@ -155,10 +157,19 @@ Application and Activity; CI uploads the screens and the debug APK. Robolectric 
 runtime from Maven Central on first run; behind a proxy or mirror, set `ROBOLECTRIC_REPO` to a Maven
 repository URL that serves it.
 
-No model weights are in the APK. What remains of its size (about 66 MB, arm64 only; debug builds
-also carry x86_64 for emulators) is the MediaPipe runtime (27 MB), bundled SQLite and the code.
-Translation goes through whichever model is available (downloaded, Gemini Nano, or your cloud key)
-rather than ML Kit Translate, whose 17 MB native library cannot be downloaded separately.
+No model weights are in the app. Nor, in Play builds, is the runtime that executes them.
+
+- **Play bundle** (`./gradlew -PsplitOnDevice=true :app:bundleRelease`): MediaPipe's runtime (27 MB
+  of native code) is the on-demand feature module `:ondevice`. The base install is about 40 MB
+  uncompressed (arm64); Settings → Intelligence asks Play for the module the first time a local
+  model is downloaded. CI builds this bundle and checks the runtime is not in the base module.
+- **Every other build** (`assembleDebug`/`assembleRelease`, sideloads, emulators) carries the
+  runtime in the base app, about 66 MB for release, so it just works without Play.
+
+The app never links MediaPipe: `:ondevice-runtime` holds the engine, and the base app finds it by
+name through the `LocalEngineFactory` interface in `:mail-ai`. Translation goes through whichever
+model is available (downloaded, Gemini Nano, or your cloud key) rather than ML Kit Translate,
+whose native library cannot be downloaded separately.
 
 **Why these versions.** The constellation pins Kotlin 2.1, which fixes two choices: ML Kit's Prompt
 API is at `1.0.0-beta2` (later betas need Kotlin 2.3+), and local models run on MediaPipe's LLM
