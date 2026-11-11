@@ -21,6 +21,10 @@ val localProps = Properties().apply {
 }
 fun secretProp(name: String): String = localProps.getProperty(name) ?: System.getenv(name) ?: ""
 
+// Play Store bundles ship the local-model runtime (MediaPipe, 27 MB of native code) as an
+// on-demand feature module; every other build carries it in the base app. See settings.gradle.kts.
+val splitOnDevice = providers.gradleProperty("splitOnDevice").orNull == "true"
+
 android {
     namespace = "dev.aarso.mail.app"
     compileSdk = 36
@@ -33,6 +37,7 @@ android {
         versionName = "1.0.0"
         // AppAuth's redirect receiver (Microsoft sign-in) listens on this scheme.
         manifestPlaceholders["appAuthRedirectScheme"] = "dev.aarso.mail"
+        buildConfigField("boolean", "SPLIT_ON_DEVICE", splitOnDevice.toString())
         buildConfigField("String", "MICROSOFT_CLIENT_ID", "\"${secretProp("MICROSOFT_CLIENT_ID")}\"")
         // Debug builds also carry x86_64 so emulators work; release is phones only (arm64).
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
@@ -47,6 +52,8 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    if (splitOnDevice) dynamicFeatures += setOf(":ondevice")
 
     buildFeatures {
         compose = true
@@ -95,6 +102,9 @@ androidComponents {
 
 dependencies {
     implementation(project(":mail-ai"))
+    if (!splitOnDevice) implementation(project(":ondevice-runtime"))
+    implementation(libs.play.feature.delivery)
+    implementation(libs.play.feature.delivery.ktx)
 
     // The constellation.
     implementation("dev.aarso:hyle:0.2.0")
@@ -133,7 +143,6 @@ dependencies {
     implementation(libs.mlkit.genai.summarization)
     implementation(libs.mlkit.genai.proofreading)
     implementation(libs.mlkit.genai.rewriting)
-    implementation(libs.mediapipe.tasks.genai)
 
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
