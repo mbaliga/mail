@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from the "You've got Mail" icon artwork: the tilted sheet with MAIL cut into it.
+     Scaled so the wordmark sits inside the adaptive-icon safe zone on every launcher mask. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:scaleX="0.04" android:scaleY="0.04" android:translateX="13.680" android:translateY="11.520">
+        <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd" android:pathData="M163,912 L1764,162 L2048,764 L1441,1572 L440,1497 Z M254,869 L361,819 L508,1170 L654,820 L762,820 L762,1304 L677,1304 L677,979 L672,979 L539,1302 L476,1302 L343,979 L338,979 L338,1282 L254,1105 Z M805,1304 L975,820 L1084,820 L1254,1304 L1161,1304 L1121,1185 L939,1185 L899,1304 Z M962,1114 L1030,914 L1097,1114 Z M1298,820 L1386,820 L1386,1304 L1298,1304 Z M1461,820 L1548,820 L1548,1230 L1693,1230 L1638,1304 L1461,1304 Z" />
+        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="18" android:strokeLineCap="butt" android:pathData="M440,1497 L1332,3237 M1441,1572 L445,3012 M1441,1572 L3405,1684" />
+    </group>
+</vector>

@@ -325,6 +325,10 @@ data class MessageHeader(
     /** Count of tracking pixels/links detected in the HTML (shown and blocked in the reader). */
     val trackerCount: Int = 0,
     val authResults: String? = null,
+    /** `Importance:` / `X-Priority:` as sent — a sender's own claim, weighed lightly. */
+    val importanceHint: String? = null,
+    /** Fingerprints of the service that sent it (github, zendesk, jira, linear, freshdesk). */
+    val serviceHints: Set<String> = emptySet(),
 ) {
     val isSeen: Boolean get() = flags and Flags.SEEN != 0
     val isFlagged: Boolean get() = flags and Flags.FLAGGED != 0

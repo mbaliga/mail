@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HTTPS everywhere by default. Cleartext is permitted only because a person may point the app at
+     a model server on their own network (Ollama, LM Studio on http://192.168.x.x), which Android's
+     config cannot express as an address range. The app itself never chooses an http:// endpoint;
+     mail protocols use TLS unless the person explicitly configures a plaintext LAN bridge. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

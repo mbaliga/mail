@@ -20,6 +20,8 @@ dependencies {
     api(project(":mail-core"))
     api(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
+    // Claude is called through the official SDK (Kotlin uses the Java SDK), never a hand-rolled client.
+    implementation(libs.anthropic.java)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

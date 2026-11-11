@@ -20,7 +20,7 @@ import javax.net.ssl.SSLSocketFactory
 open class MailException(message: String, cause: Throwable? = null) : IOException(message, cause)
 
 /** The server rejected the credentials. Distinct so the UI can ask for a new password or token. */
-class AuthenticationException(message: String, val serverText: String? = null) : MailException(message)
+open class AuthenticationException(message: String, val serverText: String? = null) : MailException(message)
 
 /** TLS could not be established or the certificate did not verify. Never silently downgraded. */
 class CertificateException(message: String, cause: Throwable? = null) : MailException(message, cause)

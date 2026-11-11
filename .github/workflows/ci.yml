@@ -1,0 +1,76 @@
+name: CI
+
+# :mail-core and :mail-ai are pure JVM (protocols, store, search, rules, the AI router) and fail
+# fast without an Android toolchain. :app then renders its screens on the JVM (Robolectric +
+# Roborazzi) and builds the APK; both are uploaded so a PR can be reviewed by looking at it.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        # Only platform-tools from the action: its default package list still asks for the
+        # legacy 'tools' package, which Google no longer serves.
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Install platform + build-tools
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Mail core tests (:mail-core:test)
+        run: ./gradlew --no-daemon :mail-core:test
+
+      - name: Intelligence tests (:mail-ai:test)
+        run: ./gradlew --no-daemon :mail-ai:test
+
+      - name: App tests and screen renders (:app:testDebugUnitTest)
+        run: ./gradlew --no-daemon :app:testDebugUnitTest
+
+      - name: Build the app (:app:assembleDebug)
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Upload screens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screens
+          path: app/build/screens/*.png
+          if-no-files-found: ignore
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: "**/build/reports/tests/"

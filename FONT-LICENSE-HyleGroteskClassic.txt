@@ -1,0 +1,4 @@
+Hyle Grotesk Classic is licensed under the SIL Open Font License, Version 1.1.
+It is built on Space Grotesk with Archivo letterforms substituted. It is a
+derivative work, not an original design, so it is not eligible for the Google
+Fonts catalog. It is free to use, modify, and redistribute under the OFL.
