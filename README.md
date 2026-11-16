@@ -193,3 +193,7 @@ added; feedback is opt-in and is always a message you see in full and send yours
 ## Typeface
 
 Hyle Grotesk Classic, under the SIL Open Font License (`FONT-LICENSE-HyleGroteskClassic.txt`).
+
+## Licence
+
+Source-available, free for noncommercial use under the [PolyForm Noncommercial License 1.0.0](LICENSE) (SPDX: `PolyForm-Noncommercial-1.0.0`). Copyright 2026 Madhav Baliga. For commercial use, contact the copyright holder.
