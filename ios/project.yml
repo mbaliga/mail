@@ -1,0 +1,57 @@
+# XcodeGen spec. `xcodegen generate` writes YouveGotMail.xcodeproj (git-ignored; CI regenerates it).
+name: YouveGotMail
+options:
+  # no bundleIdPrefix: XcodeGen would auto-generate com.asoc.YouveGotMail and shadow ios/Config/Base.xcconfig,
+  # the single place the bundle id (com.asoc.youvegotmail) lives.
+  deploymentTarget:
+    iOS: "17.0"
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
+packages:
+  MailKit:
+    path: .
+targets:
+  YouveGotMail:
+    type: application
+    platform: iOS
+    sources:
+      - App/Sources
+      - path: App/Resources
+        excludes: ["Info.plist"]
+    dependencies:
+      - package: MailKit
+        product: MailKit
+    info:
+      path: App/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: You've got Mail
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        # Mail protocols run over TLS using the OS's own crypto: standard, exempt encryption.
+        # Owner: confirm this answer at App Store Connect export-compliance time.
+        ITSAppUsesNonExemptEncryption: false
+        # No ATS exceptions: nothing in this app speaks cleartext.
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: App/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/Resources/YouveGotMail.entitlements
+  YouveGotMailTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [App/Tests]
+    dependencies:
+      - target: YouveGotMail
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.asoc.youvegotmail.tests
+        PRODUCT_NAME: YouveGotMailTests
+schemes:
+  YouveGotMail:
+    build:
+      targets:
+        YouveGotMail: all
+    test:
+      targets: [YouveGotMailTests]

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=You've got Mail
+Comment=Local-first mail (early Ubuntu Touch port)
+Exec=youvegotmail
+Icon=assets/logo.svg
+Terminal=false
+Type=Application
+X-Lomiri-Touch=true
+X-Ubuntu-Touch=true

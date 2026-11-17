@@ -1,0 +1,21 @@
+# Clickable build for You've got Mail (Ubuntu Touch). Pinned in .github/workflows/ubuntu-touch.yml
+# (clickable-ut==8.10.0 knows ubuntu-sdk-16.04 / 20.04 only; 20.04 is also what UBports focal devices run).
+clickable_minimum_required: 8.0.0
+builder: cmake
+framework: ubuntu-sdk-20.04
+kill: youvegotmail
+# The Rust core is built by CMake (cargo). The click build image needs a Rust toolchain; install it once.
+# rustup is fetched from static.rust-lang.org over HTTPS; stable channel (Cargo.lock is committed and used with --locked).
+image_setup:
+  run:
+    - "apt-get update && apt-get install -y --no-install-recommends curl ca-certificates"
+    - "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none"
+    - "ln -sf /root/.cargo/bin/rustup /usr/local/bin/rustup && ln -sf /root/.cargo/bin/cargo /usr/local/bin/cargo && ln -sf /root/.cargo/bin/rustc /usr/local/bin/rustc"
+    - "cd /tmp && rustup toolchain install stable --profile minimal && rustup default stable"
+    # The arm64/armhf builds cross-compile the Rust core (see CMakeLists.txt); amd64 needs no extra target.
+    - "rustup target add aarch64-unknown-linux-gnu armv7-unknown-linux-gnueabihf"
+ignore:
+  - core/target
+  - tests
+  - docs
+  - "*.md"

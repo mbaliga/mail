@@ -1,0 +1,17 @@
+// The ONE place the iOS identity lives. Owner follow-ups are listed in docs/PORTING_PLAN.md.
+//
+// Bundle id: owner ruling 2026-11-17 - Apple ids are com.asoc.<appname>. The Android rename branch
+// already uses com.asoc.youvegotmail, so the iOS id matches it. NAMES.md (outside this repo) needs
+// the matching row before this ships (plan rule R11).
+PRODUCT_BUNDLE_IDENTIFIER = com.asoc.youvegotmail
+PRODUCT_NAME = YouveGotMail
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+IPHONEOS_DEPLOYMENT_TARGET = 17.0
+SWIFT_VERSION = 5.0
+TARGETED_DEVICE_FAMILY = 1,2
+
+// Signing material never lives in the repo. CI builds unsigned (CODE_SIGNING_ALLOWED=NO); the
+// tag-only release job imports a certificate + profile from GitHub environment secrets.
+DEVELOPMENT_TEAM =
+CODE_SIGN_STYLE = Manual

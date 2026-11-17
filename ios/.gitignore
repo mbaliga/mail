@@ -1,0 +1,10 @@
+*.xcodeproj
+.build/
+.swiftpm/
+build/
+DerivedData/
+*.xcarchive
+*.ipa
+*.p12
+*.mobileprovision
+App/Resources/Info.plist
