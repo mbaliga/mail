@@ -1,0 +1,15 @@
+{
+    "name": "youvegotmail.asoc",
+    "title": "You've got Mail",
+    "description": "Local-first mail. Sign in over IMAP with an app password; no analytics, no cloud relay. Early port: read-only inbox.",
+    "version": "0.1.0",
+    "maintainer": "OWNER-FILL <owner-fill@example.invalid>",
+    "framework": "ubuntu-sdk-20.04",
+    "architecture": "@CLICK_ARCH@",
+    "hooks": {
+        "youvegotmail": {
+            "apparmor": "youvegotmail.apparmor",
+            "desktop": "youvegotmail.desktop"
+        }
+    }
+}

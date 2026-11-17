@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/">
+        <file>qml/Main.qml</file>
+        <file>qml/AppUi.qml</file>
+        <file>qml/SetupPage.qml</file>
+        <file>qml/InboxPage.qml</file>
+    </qresource>
+</RCC>
