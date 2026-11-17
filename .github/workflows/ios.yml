@@ -74,7 +74,9 @@ jobs:
         working-directory: ios
         run: xcodegen generate
 
-      - name: Build + test for the iOS Simulator (unsigned)
+      # Ad-hoc signed (identity "-", no team/profile): a fully unsigned app has no application-identifier
+      # entitlement, so the Keychain refuses every call with errSecMissingEntitlement (-34018).
+      - name: Build + test for the iOS Simulator (ad-hoc signed)
         working-directory: ios
         run: |
           set -o pipefail
@@ -92,7 +94,7 @@ jobs:
             -project YouveGotMail.xcodeproj -scheme YouveGotMail \
             -destination "id=$DEST" \
             -derivedDataPath build/DerivedData \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO
 
       - name: Zip the unsigned simulator .app
         if: startsWith(github.ref, 'refs/tags/ios-v')
