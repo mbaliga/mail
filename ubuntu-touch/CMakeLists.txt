@@ -16,7 +16,7 @@ set(CORE_TARGET_DIR ${CMAKE_CURRENT_BINARY_DIR}/cargo)
 set(CORE_LIB ${CORE_TARGET_DIR}/release/libmailcore.a)
 add_custom_command(
     OUTPUT ${CORE_LIB}
-    COMMAND ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CORE_TARGET_DIR} ${CARGO} build --release --locked
+    COMMAND ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CORE_TARGET_DIR} CARGO_HOME=${CMAKE_CURRENT_BINARY_DIR}/cargo-home ${CARGO} build --release --locked
             --manifest-path ${CORE_DIR}/Cargo.toml
     DEPENDS ${CORE_DIR}/Cargo.toml ${CORE_DIR}/Cargo.lock
     COMMENT "cargo build (mailcore)" VERBATIM)
