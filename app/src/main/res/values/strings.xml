@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">You\'ve got Mail</string>
+    <!-- Title of the on-demand module Play installs for local models (must live in the base app). -->
+    <string name="title_ondevice">On-device models</string>
 </resources>

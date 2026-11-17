@@ -16,7 +16,9 @@
 -dontwarn java.beans.**
 -dontwarn javax.annotation.**
 
-# MediaPipe LLM inference (JNI) and protobuf lite.
+# The local-model runtime is found by name (it may be an on-demand module), then MediaPipe's
+# LLM inference (JNI) and protobuf lite.
+-keep class dev.aarso.mail.ondevice.** { *; }
 -keep class com.google.mediapipe.** { *; }
 -keep class com.google.protobuf.** { *; }
 -dontwarn com.google.mediapipe.**

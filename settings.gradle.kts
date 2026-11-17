@@ -42,7 +42,15 @@ includeBuild("shared-libraries")
 // :mail-core — pure JVM. Protocols (IMAP, SMTP, JMAP, POP3), MIME, discovery, the store, sync,
 //              search, selection, rules and on-device heuristics. Testable without an emulator.
 // :mail-ai   — pure JVM. The intelligence router: on-device first, BYOK cloud models second.
+// :ondevice-runtime — Android library: the MediaPipe-backed local model engine. Nothing else in
+//              the project may reference MediaPipe.
 // :app       — the Android app, "You've got Mail".
 include(":mail-core")
 include(":mail-ai")
+include(":ondevice-runtime")
 include(":app")
+
+// Play Store builds ship the MediaPipe runtime as an on-demand feature module; every other build
+// (CI's debug APK, sideloads, emulators) carries it inside the base app so it just works.
+//   ./gradlew -PsplitOnDevice=true :app:bundleRelease
+if (providers.gradleProperty("splitOnDevice").orNull == "true") include(":ondevice")

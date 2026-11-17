@@ -1,13 +1,6 @@
-// MediaPipe's LLM Inference is deprecated in favour of LiteRT-LM, but LiteRT-LM needs Kotlin 2.3 /
-// Java 21 metadata and the constellation pins Kotlin 2.1. Until that pin moves, this is the
-// supported way to run a Gemma file on phones without AICore. See README → Intelligence.
-@file:Suppress("DEPRECATION")
-
 package dev.aarso.mail.app.ai
 
 import android.content.Context
-import com.google.mediapipe.tasks.genai.llminference.LlmInference
-import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.common.GenAiException
@@ -38,10 +31,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.guava.await
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.File
 
 /**
  * Gemini Nano through AICore — the model that ships with the phone, on the devices that have it.
@@ -180,66 +170,5 @@ class GeminiNanoEngine(private val context: Context) : LlmEngine {
                 s.runInference(SummarizationRequest.builder(r.prompt).build()).await().summary
             } finally { s.close() }
         }.getOrNull()?.takeIf { it.isNotBlank() }
-    }
-}
-
-/**
- * A Gemma (or any MediaPipe-compatible) model file the person put on the phone — for devices
- * without AICore. `.task` bundles carry their own chat template; bare `.bin` weights get Gemma's.
- * One inference at a time: the model holds gigabytes, and a second copy would not fit.
- */
-class LocalModelEngine(private val context: Context, private val path: () -> String?) : LlmEngine {
-    override val id = "local"
-    override val label = "Local model on this phone"
-    override val onDevice = true
-    override val maxInputTokens = 3_000
-    override val supportsStructuredOutput = false
-
-    private val mutex = Mutex()
-    private var llm: LlmInference? = null
-    private var loaded: String? = null
-
-    override suspend fun availability(): Availability {
-        val p = path() ?: return Availability.Unavailable("No model file chosen")
-        return if (File(p).canRead()) Availability.Ready else Availability.Unavailable("The model file is gone")
-    }
-
-    private fun engine(p: String): LlmInference {
-        llm?.let { if (loaded == p) return it else it.close() }
-        val options = LlmInference.LlmInferenceOptions.builder().setModelPath(p).setMaxTokens(4096).setMaxTopK(40).build()
-        return LlmInference.createFromOptions(context, options).also { llm = it; loaded = p }
-    }
-
-    private fun text(r: LlmRequest, p: String): String {
-        val json = if (r.json != null) "\n\nAnswer with JSON only, no other text." else ""
-        val body = r.system + json + "\n\n" + trimToTokens(r.prompt, maxInputTokens)
-        return if (p.endsWith(".bin", ignoreCase = true)) "<start_of_turn>user\n$body<end_of_turn>\n<start_of_turn>model\n" else body
-    }
-
-    override suspend fun generate(request: LlmRequest): LlmResponse = mutex.withLock {
-        withContext(Dispatchers.Default) {
-            val p = path() ?: throw EngineException("No local model", false)
-            val inference = try { engine(p) } catch (e: Exception) { throw EngineException("Couldn't load the model: ${e.message}", false, e) }
-            val session = LlmInferenceSession.createFromOptions(
-                inference,
-                LlmInferenceSession.LlmInferenceSessionOptions.builder().setTopK(40).setTemperature(0.3f).build(),
-            )
-            try {
-                session.addQueryChunk(text(request, p))
-                val out = session.generateResponse().replace("<end_of_turn>", "").trim()
-                if (out.isBlank()) throw EngineException("The local model gave no answer", true)
-                LlmResponse(out, id, true)
-            } catch (e: EngineException) {
-                throw e
-            } catch (e: Exception) {
-                throw EngineException("Local model: ${e.message}", true, e)
-            } finally {
-                session.close()
-            }
-        }
-    }
-
-    fun close() {
-        llm?.close(); llm = null; loaded = null
     }
 }

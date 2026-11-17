@@ -9,6 +9,12 @@ open class MailApp : Application() {
     lateinit var graph: AppGraph
         private set
 
+    override fun attachBaseContext(base: android.content.Context) {
+        super.attachBaseContext(base)
+        // Lets code and native libraries from on-demand feature modules load (Play bundles only).
+        if (BuildConfig.SPLIT_ON_DEVICE) com.google.android.play.core.splitcompat.SplitCompat.install(this)
+    }
+
     override fun onCreate() {
         super.onCreate()
         val label = getString(R.string.app_name)

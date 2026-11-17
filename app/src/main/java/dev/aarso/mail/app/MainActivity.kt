@@ -115,6 +115,7 @@ class MainActivity : ComponentActivity(), ActivityBridge {
                 }
             }
         }
+        lifecycleScope.launch { graph.runtime.confirmations.collect { startIntentSender(it) } }
         if (graph.accountsNow().isNotEmpty()) requestNotifications()
     }
 
