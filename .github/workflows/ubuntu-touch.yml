@@ -1,0 +1,126 @@
+name: Ubuntu Touch
+
+# The Ubuntu Touch port of "You've got Mail" (ubuntu-touch/): Rust core + Qt/QML shell, packaged as a click.
+# EVIDENCE CLASS: CI-LANE-WRITTEN until a run is seen. `core-and-shell` runs the same commands that passed in the
+# authoring container (ubuntu-touch/scripts/run-tests.sh). `click` needs Docker + Clickable and has NEVER run: the
+# authoring container has the Docker CLI but no daemon.
+#
+#   core-and-shell  Linux: cargo tests, qmllint, QML UI tests (offscreen), native shell self-test.
+#   click           Clickable 8.10.0 builds the unsigned .click for arm64 (phones) and amd64 (desktop mode), then
+#                   `clickable review`. arm64 runs under QEMU on the x86 runner: slow, but no cross toolchain needed.
+#   release-draft   Tags `ut-v*` only, behind the `ut-release` environment: a DRAFT release with the unsigned click.
+#
+# Secrets: NONE. A click is unsigned (OpenStore signs and reviews on its side). Actions are pinned to commit SHAs.
+on:
+  push:
+    branches: [main]
+    tags: ["ut-v*"]
+    paths: ["ubuntu-touch/**", ".github/workflows/ubuntu-touch.yml"]
+  pull_request:
+    paths: ["ubuntu-touch/**", ".github/workflows/ubuntu-touch.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: ubuntu-touch-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  LANG: C.UTF-8
+  LC_ALL: C.UTF-8
+  CLICKABLE_VERSION: "8.10.0"
+
+jobs:
+  core-and-shell:
+    name: Rust core + QML + shell self-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        # no submodules: ubuntu-touch/ is self-contained
+      - name: Install Qt 5 build and test tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++ qtbase5-dev qtdeclarative5-dev qtdeclarative5-dev-tools \
+            qml-module-qttest qml-module-qtquick2 qml-module-qtquick-controls2 \
+            qml-module-qtquick-layouts qml-module-qtquick-window2 libgl1 libegl1
+      - name: Rust toolchain (stable, preinstalled on the runner)
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Lint, test, self-test
+        run: ubuntu-touch/scripts/run-tests.sh
+
+  click:
+    name: click (${{ matrix.arch }}, unsigned)
+    needs: core-and-shell
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, amd64]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: QEMU binfmt for the arm64 build image
+        if: matrix.arch == 'arm64'
+        run: docker run --privileged --rm tonistiigi/binfmt:qemu-v7.0.0-28 --install arm64
+      - name: Install Clickable (pinned, in a venv)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/clickable-venv"
+          "$RUNNER_TEMP/clickable-venv/bin/pip" install "clickable-ut==${CLICKABLE_VERSION}"
+          echo "$RUNNER_TEMP/clickable-venv/bin" >> "$GITHUB_PATH"
+      - name: Build the click
+        working-directory: ubuntu-touch
+        run: clickable build --arch ${{ matrix.arch }}
+      - name: Review the click
+        working-directory: ubuntu-touch
+        run: clickable review --arch ${{ matrix.arch }}
+      - name: Locate the click and mark it unsigned
+        id: pkg
+        working-directory: ubuntu-touch
+        run: |
+          set -euo pipefail
+          src="$(find build -name '*.click' -print -quit)"
+          test -n "$src" || { echo "no .click produced" >&2; exit 1; }
+          mkdir -p "$RUNNER_TEMP/out"
+          dst="$RUNNER_TEMP/out/$(basename "${src%.click}")-UNSIGNED-not-for-release.click"
+          cp "$src" "$dst"
+          echo "path=$dst" >> "$GITHUB_OUTPUT"
+          ls -l "$dst"
+      # Artifacts only for tags and manual runs (the Actions artifact quota has bitten this account before).
+      - name: Upload click artifact
+        if: startsWith(github.ref, 'refs/tags/ut-v') || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: youvegotmail-click-${{ matrix.arch }}-unsigned
+          path: ${{ steps.pkg.outputs.path }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release-draft:
+    name: draft release with the unsigned clicks
+    if: startsWith(github.ref, 'refs/tags/ut-v')
+    needs: click
+    runs-on: ubuntu-24.04
+    environment: ut-release   # configure required reviewers on this GitHub environment
+    permissions:
+      contents: write
+    timeout-minutes: 10
+    steps:
+      # The SHA below was copied from the sibling repo's lane, where it was written from memory with no network to
+      # verify it. If the job fails resolving it, replace it with the v4 tag's SHA.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: youvegotmail-click-*-unsigned
+          merge-multiple: true
+          path: dist
+      - name: Create DRAFT release (never published automatically)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.click \
+            --repo "${GITHUB_REPOSITORY}" --draft \
+            --title "You've got Mail (Ubuntu Touch) ${GITHUB_REF_NAME} (UNSIGNED, device-unverified)" \
+            --notes "Early Ubuntu Touch port: read-only IMAP inbox. Unsigned click built in CI; never installed on a device by the author. See ubuntu-touch/DEVICE_CHECKLIST_UT.md."
