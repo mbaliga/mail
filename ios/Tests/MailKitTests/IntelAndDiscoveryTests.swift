@@ -52,6 +52,7 @@ final class IntelAndDiscoveryTests: XCTestCase {
         XCTAssertFalse(Providers.outlook.signInSupportedOnIOS)   // OAuth-only: not ported yet
         XCTAssertFalse(Providers.hey.signInSupportedOnIOS)       // no IMAP at all
         XCTAssertFalse(Providers.fastmail.signInSupportedOnIOS)  // JMAP: not ported yet
+        XCTAssertFalse(Providers.proton.signInSupportedOnIOS)    // STARTTLS bridge: implicit TLS only on iOS today
     }
 
     func testNoModelEngineIsTheHonestDefault() async {

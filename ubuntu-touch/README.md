@@ -27,7 +27,7 @@ DEVICE_CHECKLIST_UT.md  what only a person with an Ubuntu Touch phone can confir
 * TLS is never downgraded: `connect_tls` accepts implicit TLS only (STARTTLS and plaintext return `InsecureTransportRefused`,
   also through the C ABI). Credentials containing line breaks are refused before anything is sent.
 * The password is **not persisted**: it is typed per session, handed to the core, cleared from the text field, and the
-  Qt worker overwrites its byte copy. (Ubuntu Touch has no hardware-backed keystore comparable to Android Keystore;
+  Qt worker overwrites its byte copy (best effort: the QString copies are not wiped). (Ubuntu Touch has no hardware-backed keystore comparable to Android Keystore;
   an encrypted on-disk credential store is a deliberate follow-up, not a quiet default.)
 * AppArmor policy asks for `networking` and nothing else. No cloud model, no account relay.
 

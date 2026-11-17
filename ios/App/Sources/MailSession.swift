@@ -45,7 +45,9 @@ final class MailSession: ObservableObject {
             return
         }
         guard preset.signInSupportedOnIOS, let imap = preset.imap else {
-            errorText = preset.unsupportedReason ?? "\(preset.name) needs sign-in with the provider, which is not on iOS yet. Use an app password if the provider offers one."
+            errorText = preset.unsupportedReason ?? (preset.imap != nil && preset.imap?.security != .sslTls
+                ? "\(preset.name) needs STARTTLS, which is not on iOS yet."
+                : "\(preset.name) needs sign-in with the provider, which is not on iOS yet. Use an app password if the provider offers one.")
             return
         }
         let user = preset.username(for: trimmed)

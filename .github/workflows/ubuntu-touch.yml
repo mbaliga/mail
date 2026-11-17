@@ -109,8 +109,7 @@ jobs:
       contents: write
     timeout-minutes: 10
     steps:
-      # The SHA below was copied from the sibling repo's lane, where it was written from memory with no network to
-      # verify it. If the job fails resolving it, replace it with the v4 tag's SHA.
+      # SHA verified against the actions/download-artifact v4.3.0 tag (git ls-remote).
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: youvegotmail-click-*-unsigned

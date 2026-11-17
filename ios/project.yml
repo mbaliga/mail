@@ -1,7 +1,8 @@
 # XcodeGen spec. `xcodegen generate` writes YouveGotMail.xcodeproj (git-ignored; CI regenerates it).
 name: YouveGotMail
 options:
-  bundleIdPrefix: com.asoc
+  # no bundleIdPrefix: XcodeGen would auto-generate com.asoc.YouveGotMail and shadow ios/Config/Base.xcconfig,
+  # the single place the bundle id (com.asoc.youvegotmail) lives.
   deploymentTarget:
     iOS: "17.0"
 configFiles:

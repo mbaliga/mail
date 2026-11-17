@@ -50,7 +50,8 @@ void MailBackend::fetchInbox(const QString &host, int port, const QString &secur
     m_busy = true;
     emit busyChanged();
     QPointer<MailBackend> self(this);
-    // Copies into the worker; the password lives only in this lambda's QByteArray for the call.
+    // Copies into the worker. The QByteArray copy is wiped after the call; the by-value QString capture is not
+    // (Qt gives no portable wipe for it), so this is hygiene, not a guarantee.
     QtConcurrent::run([=]() {
         QByteArray h = host.toUtf8(), s = security.toUtf8(), u = user.toUtf8(), p = password.toUtf8();
         const QJsonObject r = take(mailcore_fetch_inbox(h.constData(), port, s.constData(), u.constData(),

@@ -26,9 +26,10 @@ public struct ProviderPreset: Equatable, Sendable {
     }
 
     /// Whether this build of the iOS app can sign in to this provider today. OAuth (Gmail/Outlook
-    /// sign-in with the provider) and JMAP are not ported yet; app passwords and passwords are.
+    /// sign-in with the provider), JMAP and STARTTLS are not ported yet; app passwords and passwords over implicit TLS are.
     public var signInSupportedOnIOS: Bool {
-        supported && protocolKind == .imap && (auth.contains(.appPassword) || auth.contains(.password))
+        supported && protocolKind == .imap && imap?.security == .sslTls
+            && (auth.contains(.appPassword) || auth.contains(.password))
     }
 }
 

@@ -19,7 +19,7 @@ webpki-roots = "1"
 [profile.release]
 opt-level = "s"
 lto = true
-panic = "abort"
+# no panic = "abort": ffi.rs relies on catch_unwind to turn a panic into an error JSON instead of killing the app
 strip = true
 
 [dev-dependencies]
