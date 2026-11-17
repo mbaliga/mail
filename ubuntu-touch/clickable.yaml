@@ -12,6 +12,8 @@ image_setup:
     - "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none"
     - "ln -sf /root/.cargo/bin/rustup /usr/local/bin/rustup && ln -sf /root/.cargo/bin/cargo /usr/local/bin/cargo && ln -sf /root/.cargo/bin/rustc /usr/local/bin/rustc"
     - "cd /tmp && rustup toolchain install stable --profile minimal && rustup default stable"
+    # The arm64/armhf builds cross-compile the Rust core (see CMakeLists.txt); amd64 needs no extra target.
+    - "rustup target add aarch64-unknown-linux-gnu armv7-unknown-linux-gnueabihf"
 ignore:
   - core/target
   - tests
