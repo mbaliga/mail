@@ -1,4 +1,4 @@
-# Porting plan - iOS (and Ubuntu Touch, later)
+# Porting plan - iOS and Ubuntu Touch
 
 Status date: 2026-11-17. There was no porting-plan branch for this repo, so this file is derived
 from an audit of `main` plus the owner's request of 2026-11-17 (Apple bundle ids are
@@ -80,6 +80,52 @@ tag-only (`ios-v*`) signed archive behind the `ios-release` environment. Private
 6. Export-compliance answer (`ITSAppUsesNonExemptEncryption: false` is set on the belief that TLS via the OS is exempt).
 7. Register OAuth clients for Google/Microsoft if sign-in-with-provider is wanted on iOS.
 
-## Ubuntu Touch (next stage, not started here)
-Native Qt/QML (Lomiri) shell. The Swift core does not help there; the options are a Rust/C++ core, or
-the Kotlin core as a localhost-only JVM sidecar (a companion, to be labelled as such). Decide in that stage.
+## Ubuntu Touch (early port, built here)
+Status date: 2026-11-17. Lives in `ubuntu-touch/`; lane `.github/workflows/ubuntu-touch.yml`.
+
+### Decision: Rust core + Qt/QML shell
+Options weighed (the audit's list), with the concrete reason for the pick:
+1. **Kotlin/Native `linuxArm64` core** - rejected for the same reason as KMP on iOS: `:mail-core` is JVM-only
+   (`java.net`, `javax.net.ssl`, okhttp, `javax.xml`), so it would be a rewrite that the Android gate cannot protect.
+2. **Kotlin core on a bundled JRE as a localhost sidecar** - rejected: Ubuntu Touch has no JRE in the confined runtime;
+   shipping one is large, and the result would be "the Android core in a wrapper", closer to the Waydroid-style
+   substitute the owner ruled out than to a native port.
+3. **Rust core + Qt/QML shell (chosen).** Native on the platform's own toolkit; the portable slice is re-implemented in
+   Rust with vectors lifted from the Kotlin tests (the Swift core uses the same ones), and it **builds and tests on
+   this Linux container**, which is the only thing that makes it verifiable here. Cost: a third implementation to keep
+   in step (drift ledger below). Rust over C++ for memory safety in a parser fed by hostile network bytes.
+4. Swift core reuse - not possible: no Swift toolchain on Ubuntu Touch devices.
+
+### Port ledger (Kotlin -> Rust, `ubuntu-touch/core/src`)
+| Area | Kotlin (`:mail-core`) | Rust | Evidence |
+|---|---|---|---|
+| Charsets, base64, QP, RFC 2047 | `mime/Codecs.kt` | `mime.rs` (encoding_rs for charsets) | BUILT-HERE (cargo test) |
+| IMAP response grammar, UTF-7, UID sets, quoting | `imap/ImapProtocol.kt` | `imap.rs` | BUILT-HERE |
+| ENVELOPE, message ids, RFC 5322 dates | `imap/FetchModel.kt` | `envelope.rs` | BUILT-HERE |
+| OTP / magic link | `intel/Otp.kt` | `otp.rs` (fancy-regex for look-around) | BUILT-HERE |
+| Providers (11 of the Kotlin table) | `discovery/Providers.kt` | `providers.rs` | BUILT-HERE |
+| LOGIN / EXAMINE / FETCH, implicit TLS only | `net/`, `imap/ImapClient.kt` | `client.rs` (rustls+ring, generic stream) | protocol logic BUILT-HERE against scripted streams; the real TLS socket path is CODE-ONLY (never connected to a server) |
+| C ABI + Qt facade + QML UI | - | `ffi.rs`, `cpp/`, `qml/` | native shell links, loads the QML and passes `--selftest` offscreen: BUILT-HERE; QML UI logic: BUILT-HERE (QtTest, test double); rendering/touch: NEEDS-DEVICE-VALIDATION |
+| click packaging | - | `clickable.yaml`, `manifest.json.in`, apparmor, desktop | clickable.yaml validates against Clickable 8.10.0's own schema; the click itself was NEVER built (no Docker daemon): CI-LANE-WRITTEN |
+
+Differences from the Swift port, on purpose: the Rust core also ships an RFC 5322 date parser that does not need
+Foundation, and `client.rs` is generic over `Read + Write` so the whole session logic is tested without a network.
+Known drift: charset coverage follows `encoding_rs` (a superset of the Swift list); date zone names are limited to
+UT/UTC/GMT/Z and the US zones.
+
+### Not ported yet (Ubuntu Touch; same list as iOS plus platform items)
+Message bodies (MIME tree, HTML to text), SQLite store + FTS5 search (`search-core` needs a Rust or C binding), SMTP send /
+outbox / drafts, STARTTLS, IDLE, CONDSTORE, Gmail extensions, POP3, JMAP, OAuth (needs owner-registered client ids and a
+web-auth surface), rules/Sieve/snooze, push and background sync (no WorkManager; the UT push service or a confined
+daemon is undecided), notifications, on-device model (llama.cpp behind the `LlmEngine` seam, not started), Hyle on QML,
+the other ~17 providers, armhf builds, Lomiri.Components / Suru styling.
+Credential storage: no hardware-backed keystore on UT. The app keeps the password in memory per session; a persistent
+store (libsecret via online-accounts, or an encrypted file with a user passphrase) is an owner decision.
+
+### Owner follow-ups (Ubuntu Touch)
+1. Confirm the click name `youvegotmail.asoc` and the maintainer string in `ubuntu-touch/manifest.json.in` (permanent once on OpenStore).
+2. Create the `ut-release` GitHub environment (required reviewers). No secrets are used; clicks are unsigned.
+3. First CI run: expect fixes in the `click` job (Rust install inside the Clickable image under QEMU, `tonistiigi/binfmt` tag, download-artifact SHA).
+4. Device verification: `ubuntu-touch/DEVICE_CHECKLIST_UT.md`.
+5. Decide credential persistence and the OAuth / JMAP / body-reading order for the next slices.
+6. OpenStore submission (account, review, icon/screenshots) when the app is worth listing.
