@@ -18,6 +18,9 @@ import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Context
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -99,9 +102,15 @@ class MainActivity : ComponentActivity(), ActivityBridge {
         state = AppState(graph, graph.scope)
         setContent {
             val bridge = remember { this@MainActivity as ActivityBridge }
+            // The brand splash, once per cold start: the system splash hands over to it, then it fades out.
+            var splash by remember { mutableStateOf(savedInstanceState == null) }
+            androidx.compose.runtime.LaunchedEffect(Unit) { if (splash) { kotlinx.coroutines.delay(900); splash = false } }
             MailTheme {
                 CompositionLocalProvider(LocalApp provides state, LocalBridge provides bridge) {
                     AppRoot(state)
+                }
+                androidx.compose.animation.AnimatedVisibility(splash, exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(350))) {
+                    dev.aarso.mail.app.ui.components.BrandSplash()
                 }
             }
         }

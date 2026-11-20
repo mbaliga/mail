@@ -99,7 +99,7 @@ fun MessageList(
     modifier: Modifier = Modifier,
     speakingId: Long? = null,
     focusedId: Long? = null,
-    emptyText: String = "Nothing here.",
+    empty: List<dev.aarso.mail.app.ui.components.Bit> = listOf(dev.aarso.mail.app.ui.components.plain("Nothing here.")),
     bottomPadding: Dp = 24.dp,
     header: (LazyListScope.() -> Unit)? = null,
 ) {
@@ -171,7 +171,7 @@ fun MessageList(
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (items.isEmpty() && result != null) {
-                Text(emptyText, style = Type.body.copy(color = Palette.SheetInkDim), modifier = Modifier.padding(horizontal = m.gutter, vertical = 28.dp))
+                dev.aarso.mail.app.ui.components.EmptyStatement(empty)
             }
             var dragAnchor by remember { mutableStateOf<Long?>(null) }
             var dragBase by remember { mutableStateOf(selection) }

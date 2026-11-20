@@ -54,6 +54,7 @@ import dev.aarso.mail.app.ui.components.HyIcons
 import dev.aarso.mail.app.ui.components.IconAction
 import dev.aarso.mail.app.ui.components.LineField
 import dev.aarso.mail.app.ui.components.Page
+import dev.aarso.mail.app.ui.components.PageFooter
 import dev.aarso.mail.app.ui.components.ProvenanceMark
 import dev.aarso.mail.app.ui.components.SheetChip
 import dev.aarso.mail.app.ui.components.SolidButton
@@ -141,6 +142,8 @@ fun ComposeScreen(initial: Draft, onClose: () -> Unit) {
                 scope.launch { if (draft.id > 0) g.store.deleteDraft(draft.id) }
                 onClose()
             })
+        },
+        toolbar = {
             IconAction(HyIcons.paperclip, "Attach", Palette.Ink, {
                 scope.launch {
                     val uris = bridge.pickDocuments(arrayOf("*/*"), multiple = true)
@@ -148,9 +151,8 @@ fun ComposeScreen(initial: Draft, onClose: () -> Unit) {
                 }
             })
             IconAction(HyIcons.sparkle, "Help me write", Palette.Ink, { assist = true })
-            IconAction(HyIcons.clock, "Send later", Palette.Ink, { later = true })
-            IconAction(HyIcons.send, "Send", Palette.Ink, { send() })
         },
+        footer = { PageFooter(primary = "Send", onPrimary = { send() }, secondary = "Send later", onSecondary = { later = true }) },
     ) {
         Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = m.gutter)) {
             Spacer(Modifier.height(8.dp))

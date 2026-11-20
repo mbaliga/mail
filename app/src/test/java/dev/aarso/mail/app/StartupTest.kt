@@ -34,7 +34,7 @@ class TestMailApp : MailApp() {
 @Config(sdk = [35], qualifiers = "w411dp-h891dp-xxhdpi", application = TestMailApp::class)
 class StartupTest {
 
-    private fun idle() = repeat(20) { shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(50) }
+    private fun idle() = repeat(45) { shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(50) }
 
     @Test fun firstRunShowsWelcome() {
         ActivityScenario.launch(MainActivity::class.java).use { s ->

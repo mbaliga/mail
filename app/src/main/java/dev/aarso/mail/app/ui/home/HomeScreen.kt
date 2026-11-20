@@ -45,6 +45,8 @@ import dev.aarso.mail.app.ui.components.PhraseButton
 import dev.aarso.mail.app.ui.components.TabItem
 import dev.aarso.mail.app.ui.components.TabStrip
 import dev.aarso.mail.app.ui.components.TldrToggle
+import dev.aarso.mail.app.ui.components.action
+import dev.aarso.mail.app.ui.components.plain
 import dev.aarso.mail.app.ui.components.countLine
 import dev.aarso.mail.app.ui.list.MessageList
 import dev.aarso.mail.app.ui.list.rememberListController
@@ -163,7 +165,13 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     controller = list,
                     tldr = settings.tldr,
                     speakingId = speaking?.toLongOrNull(),
-                    emptyText = if (accounts.isEmpty()) "Add an account to begin." else "Nothing new here ${settings.digestWindow.phrase}.",
+                    empty = if (accounts.isEmpty()) listOf(plain("Add an account to begin."))
+                    else listOf(
+                        plain("You’re all caught up ${settings.digestWindow.phrase}. "),
+                        action("Check for mail", { g.scope.launch { g.sync.syncAll(inboxOnly = true) }; app.say("Checking for mail") }),
+                        plain(", or "),
+                        action("look further back.", { g.updateSettings { it.copy(digestWindow = DigestWindow.LAST_30_DAYS) } }),
+                    ),
                     onOpen = { id, siblings -> app.open(Screen.Reader(id, siblings)) },
                     modifier = Modifier.fillMaxSize(),
                     bottomPadding = 104.dp,

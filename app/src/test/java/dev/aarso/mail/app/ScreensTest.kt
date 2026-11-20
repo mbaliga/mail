@@ -6,7 +6,19 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResult
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -175,6 +187,33 @@ class ScreensTest {
         rule.waitForIdle()
         rule.onRoot().captureRoboImage("build/screens/mailbox-selecting.png")
     }
+
+    @Test fun firstRun() = show("first-run", waitFor = "set up yet") { dev.aarso.mail.app.ui.components.FirstRun {} }
+
+    @Test fun setup() = show("setup", waitFor = "WORKS WITH") { dev.aarso.mail.app.ui.accounts.AccountSetupScreen(null) {} }
+
+    @Test fun setupStepTwo() {
+        val id = runBlocking { graph.store.accounts().first().id }
+        show("setup-sign-in", waitFor = "Sign in") { dev.aarso.mail.app.ui.accounts.AccountSetupScreen(id) {} }
+    }
+
+    @Test fun brandSplash() = show("brand-splash") { dev.aarso.mail.app.ui.components.BrandSplash() }
+
+    @Test fun brandIcon() = show("brand-icon") {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(240.dp).clip(RoundedCornerShape(56.dp)).background(Color(0xFF1F3354))) {
+                Image(painterResource(dev.aarso.mail.app.R.drawable.ic_launcher_foreground), null, Modifier.fillMaxSize())
+            }
+        }
+    }
+
+    @Test fun ruleEditor() = show("rule-editor", waitFor = "Save") {
+        dev.aarso.mail.app.ui.rules.RuleEditor(MailRule(name = "Old newsletters", query = "category:newsletters older_than:7d in:inbox", actions = listOf(RuleAction.Archive))) {}
+    }
+
+    @Test fun emptyFolder() = show("mailbox-empty", waitFor = "is empty") { MailboxScreen(Screen.Mailbox("Trash", "in:trash")) {} }
+
+    @Test fun outbox() = show("outbox-empty", waitFor = "waiting to send") { dev.aarso.mail.app.ui.compose.OutboxScreen {} }
 
     @Test fun places() = show("room-places", waitFor = "Inbox") { PlacesRoom {} }
 
