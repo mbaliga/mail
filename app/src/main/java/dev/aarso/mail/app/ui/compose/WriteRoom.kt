@@ -137,7 +137,7 @@ fun OutboxScreen(onBack: () -> Unit) {
     val outbox by remember { app.graph.store.observeOutbox() }.collectAsState(initial = emptyList())
     Page("Outbox", onBack) {
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
-            if (outbox.isEmpty()) item { Text("Nothing waiting to send.", style = Type.body.copy(color = Palette.SheetInkDim), modifier = Modifier.padding(vertical = 24.dp)) }
+            if (outbox.isEmpty()) item { dev.aarso.mail.app.ui.components.EmptyStatement(listOf(dev.aarso.mail.app.ui.components.plain("Nothing is waiting to send.")), Modifier.padding(horizontal = 0.dp)) }
             items(outbox, key = { it.id }) { OutboxRow(it, dark = false) }
         }
     }

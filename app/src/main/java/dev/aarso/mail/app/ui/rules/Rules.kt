@@ -44,6 +44,7 @@ import dev.aarso.mail.app.ui.components.HyIcons
 import dev.aarso.mail.app.ui.components.IconAction
 import dev.aarso.mail.app.ui.components.LineField
 import dev.aarso.mail.app.ui.components.Page
+import dev.aarso.mail.app.ui.components.PageFooter
 import dev.aarso.mail.app.ui.components.Room
 import dev.aarso.mail.app.ui.components.RoomChip
 import dev.aarso.mail.app.ui.components.SectionLabel
@@ -196,13 +197,19 @@ fun RuleEditor(initial: MailRule?, onClose: () -> Unit) {
     Page(
         title = if (initial?.id ?: 0 > 0) "Edit rule" else "New rule",
         onBack = onClose,
-        actions = {
-            TextAction("Save", Palette.Ink, {
-                scope.launch {
-                    g.store.saveRule(rule.copy(name = rule.name.ifBlank { rule.query.take(40) }, createdAt = rule.createdAt.takeIf { it > 0 } ?: System.currentTimeMillis()))
-                    onClose()
-                }
-            }, enabled = rule.query.isNotBlank() && rule.actions.isNotEmpty() && diagnostics.isEmpty())
+        footer = {
+            PageFooter(
+                primary = "Save",
+                onPrimary = {
+                    scope.launch {
+                        g.store.saveRule(rule.copy(name = rule.name.ifBlank { rule.query.take(40) }, createdAt = rule.createdAt.takeIf { it > 0 } ?: System.currentTimeMillis()))
+                        onClose()
+                    }
+                },
+                secondary = "Run on existing mail",
+                onSecondary = { confirmRun = true },
+                enabled = rule.query.isNotBlank() && rule.actions.isNotEmpty() && diagnostics.isEmpty(),
+            )
         },
     ) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)) {
@@ -244,7 +251,6 @@ fun RuleEditor(initial: MailRule?, onClose: () -> Unit) {
             SwitchRow("On", rule.enabled, { rule = rule.copy(enabled = it) })
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SolidButton("Run on existing mail", { confirmRun = true }, enabled = rule.query.isNotBlank() && rule.actions.isNotEmpty() && diagnostics.isEmpty())
                 if (rule.id > 0) TextAction("Delete rule", Palette.Danger, { confirmDelete = true })
             }
             Spacer(Modifier.height(32.dp))

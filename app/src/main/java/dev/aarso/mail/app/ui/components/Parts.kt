@@ -364,49 +364,6 @@ fun LineField(
     }
 }
 
-/**
- * The frame for pages that open over home (a mailbox, a message, settings): the black field
- * with a large title, and the white sheet below it.
- */
-@Composable
-fun Page(
-    title: String,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
-    subtitle: (@Composable () -> Unit)? = null,
-    actions: @Composable RowScope.() -> Unit = {},
-    header: @Composable ColumnScope.() -> Unit = {},
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    val m = LocalMetrics.current
-    Column(modifier.fillMaxSize().background(Palette.Field).statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().padding(start = m.gutter - 12.dp, end = m.gutter - 12.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconAction(HyIcons.arrowLeft, "Back", Palette.Ink, onBack)
-            Spacer(Modifier.weight(1f))
-            actions()
-        }
-        Column(Modifier.padding(horizontal = m.gutter).widthIn(max = 900.dp)) {
-            Text(title, style = Type.title.copy(color = Palette.Ink), maxLines = 3, overflow = TextOverflow.Ellipsis)
-            subtitle?.invoke()
-        }
-        header()
-        Spacer(Modifier.height(14.dp))
-        MailSheet(Modifier.fillMaxSize(), content = content)
-    }
-}
-
-/** A dark room's frame (Places, Find, Rules, Write): Hyle's raised field and a quiet title. */
-@Composable
-fun Room(title: String, modifier: Modifier = Modifier, actions: @Composable RowScope.() -> Unit = {}, content: @Composable ColumnScope.() -> Unit) {
-    Column(modifier.fillMaxSize().background(Palette.Room).statusBarsPadding().padding(top = 8.dp)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(title, style = Type.title.copy(color = Palette.RoomInk), modifier = Modifier.weight(1f))
-            actions()
-        }
-        content()
-    }
-}
-
 // ---- formatting ----
 
 private val timeFmt = DateTimeFormatter.ofPattern("HH:mm")

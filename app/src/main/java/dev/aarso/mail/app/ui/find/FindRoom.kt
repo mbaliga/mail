@@ -49,6 +49,8 @@ import dev.aarso.mail.app.ui.components.Room
 import dev.aarso.mail.app.ui.components.RoomChip
 import dev.aarso.mail.app.ui.components.SectionLabel
 import dev.aarso.mail.app.ui.components.TextAction
+import dev.aarso.mail.app.ui.components.action
+import dev.aarso.mail.app.ui.components.plain
 import dev.aarso.mail.app.ui.components.countPhrase
 import dev.aarso.mail.app.ui.list.MessageList
 import dev.aarso.mail.app.ui.list.rememberListController
@@ -207,7 +209,9 @@ fun FindRoom(onOpen: (Screen) -> Unit) {
                     controller = list,
                     tldr = settings.tldr,
                     onOpen = { id, siblings -> addRecent(live); onOpen(Screen.Reader(id, siblings)) },
-                    emptyText = "No mail matches. Try “Search servers too” for older mail.",
+                    empty = listOf(plain("No mail matches. "), action("Search the servers", {
+                        if (!serverBusy) { serverBusy = true; scope.launch { var n = 0; for (a in g.accountsNow().filter { it.enabled }) n += runCatching { g.sync.serverSearch(a, live).size }.getOrDefault(0); serverHits = n; serverBusy = false } }
+                    }), plain(" for older mail.")),
                     modifier = Modifier.fillMaxSize(),
                 )
             }

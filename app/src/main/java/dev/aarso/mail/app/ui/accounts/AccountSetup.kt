@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -35,7 +36,11 @@ import dev.aarso.mail.app.platform.ConsentRequiredException
 import dev.aarso.mail.app.platform.Work
 import dev.aarso.mail.app.ui.LocalApp
 import dev.aarso.mail.app.ui.LocalBridge
+import dev.aarso.mail.app.ui.components.CenteredLabel
 import dev.aarso.mail.app.ui.components.LineField
+import dev.aarso.mail.app.ui.components.PageFooter
+import dev.aarso.mail.app.ui.components.ProviderStrip
+import dev.aarso.mail.app.ui.components.formGutter
 import dev.aarso.mail.app.ui.components.Page
 import dev.aarso.mail.app.ui.components.ProvenanceMark
 import dev.aarso.mail.app.ui.components.SectionLabel
@@ -84,6 +89,7 @@ fun AccountSetupScreen(reauthAccountId: Long?, onDone: () -> Unit) {
     var busy by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var manual by remember { mutableStateOf(false) }
+    var provider by remember { mutableStateOf<dev.aarso.mail.discovery.ProviderPreset?>(null) }
     var auth by remember { mutableStateOf(AuthKind.PASSWORD) }
 
     // Manual / editable server settings.
@@ -211,44 +217,106 @@ fun AccountSetupScreen(reauthAccountId: Long?, onDone: () -> Unit) {
         }
     }
 
-    Page(if (reauthAccountId != null) "Sign in again" else "Add an account", onDone) {
-        Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)) {
-            Spacer(Modifier.height(12.dp))
-            if (chosen == null && !manual) {
-                LineField(email, { email = it; error = null }, "you@example.com", keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
-                LineField(name, { name = it }, "Your name, as people see it")
-                Spacer(Modifier.height(16.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SolidButton(busy ?: "Continue", {
-                        if (!email.contains('@') || busy != null) return@SolidButton
-                        scope.launch {
-                            busy = "Looking up ${email.substringAfter('@')}"
-                            configs = runCatching { g.discovery.discover(email.trim()) }.getOrDefault(emptyList())
-                            busy = null
-                            val first = configs.firstOrNull()
-                            if (first == null) { manual = true; error = "Couldn't find settings for ${email.substringAfter('@')} — enter them below." } else choose(first)
-                        }
-                    }, enabled = email.contains('@'))
-                    TextAction("Enter servers myself", Palette.Navy, { manual = true })
+    val step1 = chosen == null && !manual
+    // The address as typed, or a bare name plus the provider circle that was tapped.
+    val address = when {
+        email.contains('@') -> email.trim()
+        provider != null && email.isNotBlank() -> email.trim() + "@" + (provider!!.domains.firstOrNull() ?: "")
+        else -> email.trim()
+    }
+
+    fun backOneStep() {
+        when {
+            chosen != null || manual -> { chosen = null; manual = false; error = null; secret = "" }
+            else -> onDone()
+        }
+    }
+    androidx.activity.compose.BackHandler(enabled = !step1) { backOneStep() }
+
+    fun lookUp() {
+        if (!address.contains('@') || busy != null) return
+        scope.launch {
+            email = address
+            busy = "Looking up ${address.substringAfter('@')}"
+            configs = runCatching { g.discovery.discover(address) }.getOrDefault(emptyList())
+            busy = null
+            val first = configs.firstOrNull()
+            if (first == null) { manual = true; error = "Couldn't find settings for ${address.substringAfter('@')} — enter them below." } else choose(first)
+        }
+    }
+
+    val ready = busy == null && email.contains('@') && (auth == AuthKind.OAUTH2 || secret.isNotBlank()) &&
+        (protocol == IncomingProtocol.JMAP && jmapUrl.isNotBlank() || inHost.isNotBlank())
+
+    Page(
+        title = when {
+            reauthAccountId != null -> "Sign in again"
+            step1 -> "Add an account"
+            else -> chosen?.preset?.name ?: "Server settings"
+        },
+        onBack = { backOneStep() },
+        subtitle = if (step1) null else email.takeIf { it.isNotBlank() },
+        footer = {
+            PageFooter(
+                primary = busy ?: when {
+                    step1 -> "Continue"
+                    auth == AuthKind.OAUTH2 -> "Sign in with ${chosen?.preset?.name ?: "provider"}"
+                    else -> "Sign in"
+                },
+                onPrimary = { if (step1) lookUp() else if (busy == null) signIn() },
+                secondary = when {
+                    step1 -> "Enter servers myself"
+                    manual -> if (chosen != null) "Hide server settings" else "Back"
+                    else -> "Server settings"
+                },
+                onSecondary = {
+                    when {
+                        step1 -> manual = true
+                        manual -> if (chosen != null) manual = false else backOneStep()
+                        else -> manual = true
+                    }
+                },
+                enabled = if (step1) (address.contains('@') && busy == null) else ready,
+            )
+        },
+    ) {
+        val gutter = formGutter()
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Spacer(Modifier.height(28.dp))
+            if (step1) {
+                Column(Modifier.padding(horizontal = gutter)) {
+                    LineField(
+                        email, { email = it; error = null },
+                        provider?.let { "you@${it.domains.firstOrNull() ?: "example.com"}" } ?: "you@example.com",
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    LineField(name, { name = it }, "Your name, as people see it")
                 }
-                SectionLabel("Works with")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (p in Providers.featured) SheetChip(p.name, false, { if (!email.contains('@')) email = "@" + (p.domains.firstOrNull() ?: "") })
-                }
-                Text("…and any provider with IMAP, POP3 or JMAP: Zoho, GMX, Posteo, mailbox.org, Yandex, your company's server.", style = Type.small.copy(color = Palette.SheetInkDim), modifier = Modifier.padding(top = 10.dp))
-            } else {
+                Spacer(Modifier.height(30.dp))
+                CenteredLabel("Works with")
+                ProviderStrip(
+                    providers = Providers.featured + Providers.all.filter { it.supported && it !in Providers.featured },
+                    selectedId = provider?.id,
+                    onPick = { p -> provider = if (provider?.id == p.id) null else p },
+                )
+                Text(
+                    "…and any provider with IMAP, POP3 or JMAP; Zoho, GMX, Posteo, mailbox.org, Yandex, your company’s server.",
+                    style = Type.small.copy(color = Palette.SheetInkDim, textAlign = androidx.compose.ui.text.style.TextAlign.Center),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = gutter + 8.dp, vertical = 26.dp),
+                )
+                busy?.let { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { ProvenanceMark(true, working = true) } }
+            } else Column(Modifier.padding(horizontal = gutter)) {
                 val preset = chosen?.preset
-                Text(email, style = Type.heading)
-                Text(preset?.name ?: chosen?.displayName ?: "Custom server", style = Type.body.copy(color = Palette.SheetInkDim))
                 chosen?.source?.let { s -> if (s != DiscoverySource.PRESET) Text("Settings found via ${s.name.lowercase().replace('_', ' ')}", style = Type.small.copy(color = Palette.SheetInkDim)) }
 
                 if (preset != null && !preset.supported) {
                     Text(preset.unsupportedReason ?: "${preset.name} doesn't allow other mail apps.", style = Type.body.copy(color = Palette.Danger), modifier = Modifier.padding(top = 16.dp))
-                } else {
-                    val options = (chosen?.auth ?: listOf(AuthKind.PASSWORD, AuthKind.APP_PASSWORD)).distinct()
+                } else if (chosen != null) {
+                    val options = chosen!!.auth.ifEmpty { listOf(AuthKind.PASSWORD, AuthKind.APP_PASSWORD) }.distinct()
                     if (options.size > 1) {
-                        SectionLabel("Sign in with")
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CenteredLabel("Sign in with")
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                             for (o in options) SheetChip(
                                 when (o) { AuthKind.OAUTH2 -> "${preset?.name ?: "Provider"} account"; AuthKind.APP_PASSWORD -> "App password"; AuthKind.API_TOKEN -> "API token"; AuthKind.PASSWORD -> "Password" },
                                 auth == o, { auth = o },
@@ -256,63 +324,58 @@ fun AccountSetupScreen(reauthAccountId: Long?, onDone: () -> Unit) {
                         }
                     }
                     if (auth == AuthKind.OAUTH2 && !oauthReady(chosen?.oauthProvider, g)) {
-                        Text("Sign-in with ${preset?.name} isn't set up in this build (see README → Sign-in setup). Use an app password instead.", style = Type.small.copy(color = Palette.Warning), modifier = Modifier.padding(top = 8.dp))
+                        Text("Sign-in with ${preset?.name} isn't set up in this build (see README → Sign-in setup). Use an app password instead.", style = Type.small.copy(color = Palette.Warning), modifier = Modifier.padding(top = 12.dp))
                     }
                     if (auth != AuthKind.OAUTH2) {
                         if (auth == AuthKind.APP_PASSWORD || auth == AuthKind.API_TOKEN) {
-                            for (step in preset?.setupSteps.orEmpty()) Text(step, style = Type.small, modifier = Modifier.padding(top = 8.dp))
+                            for ((i, st) in preset?.setupSteps.orEmpty().withIndex()) Row(Modifier.padding(top = 12.dp)) {
+                                Text("${i + 1}", style = Type.small.copy(color = Palette.Navy, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), modifier = Modifier.width(22.dp))
+                                Text(st, style = Type.small)
+                            }
                             preset?.appPasswordUrl?.let { url ->
-                                TextAction(if (auth == AuthKind.API_TOKEN) "Create a token" else "Create an app password", Palette.Navy, { bridge.launch(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) })
+                                TextAction(if (auth == AuthKind.API_TOKEN) "Create a token" else "Create an app password", Palette.Window, { bridge.launch(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) })
                             }
                         }
+                        Spacer(Modifier.height(10.dp))
                         LineField(secret, { secret = it; error = null }, when (auth) { AuthKind.APP_PASSWORD -> "App password"; AuthKind.API_TOKEN -> "API token"; else -> "Password" },
                             visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
                     }
                 }
-                TextAction(if (manual) "Hide server settings" else "Server settings", Palette.Navy, { manual = !manual }, Modifier.padding(top = 8.dp))
-            }
 
-            if (manual) {
-                if (chosen == null) {
-                    LineField(email, { email = it }, "you@example.com", keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
-                    LineField(name, { name = it }, "Your name")
-                    LineField(secret, { secret = it }, "Password", visualTransformation = PasswordVisualTransformation())
-                }
-                SectionLabel("Incoming")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (p in IncomingProtocol.entries) SheetChip(p.name, protocol == p, {
-                        protocol = p
-                        if (p == IncomingProtocol.POP3 && inPort == "993") inPort = "995"
-                        if (p == IncomingProtocol.IMAP && inPort == "995") inPort = "993"
-                    })
-                }
-                if (protocol == IncomingProtocol.JMAP) {
-                    LineField(jmapUrl, { jmapUrl = it }, "https://jmap.example.com/.well-known/jmap")
-                } else {
-                    LineField(inHost, { inHost = it }, "imap.example.com")
-                    Row { LineField(inPort, { inPort = it.filter(Char::isDigit) }, "Port", Modifier.width(90.dp)); Spacer(Modifier.width(12.dp)); SecurityChips(inSec) { inSec = it } }
-                    LineField(user, { user = it }, "Username (usually your address)")
-                }
-                SectionLabel("Sending (SMTP)")
-                LineField(outHost, { outHost = it }, if (protocol == IncomingProtocol.JMAP) "Not needed for JMAP" else "smtp.example.com")
-                Row { LineField(outPort, { outPort = it.filter(Char::isDigit) }, "Port", Modifier.width(90.dp)); Spacer(Modifier.width(12.dp)); SecurityChips(outSec) { outSec = it } }
-                if (inSec == Security.NONE || outSec == Security.NONE) Text("Without encryption your password crosses the network readable. Only for a bridge on this device or your own network.", style = Type.small.copy(color = Palette.Danger), modifier = Modifier.padding(top = 6.dp))
-            }
-
-            error?.let { Text(it, style = Type.small.copy(color = Palette.Danger), modifier = Modifier.padding(top = 14.dp)) }
-            if (chosen != null || manual) {
-                Spacer(Modifier.height(18.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SolidButton(busy ?: if (auth == AuthKind.OAUTH2) "Sign in with ${chosen?.preset?.name ?: "provider"}" else "Sign in", { if (busy == null) signIn() },
-                        enabled = busy == null && email.contains('@') && (auth == AuthKind.OAUTH2 || secret.isNotBlank()) && (protocol == IncomingProtocol.JMAP && jmapUrl.isNotBlank() || inHost.isNotBlank()))
-                    if (busy != null) ProvenanceMark(true, working = true, modifier = Modifier.padding(top = 14.dp))
+                if (manual) {
+                    if (chosen == null) {
+                        LineField(email, { email = it }, "you@example.com", keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
+                        LineField(name, { name = it }, "Your name")
+                        LineField(secret, { secret = it }, "Password", visualTransformation = PasswordVisualTransformation())
+                    }
+                    CenteredLabel("Incoming")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), modifier = Modifier.fillMaxWidth()) {
+                        for (p in IncomingProtocol.entries) SheetChip(p.name, protocol == p, {
+                            protocol = p
+                            if (p == IncomingProtocol.POP3 && inPort == "993") inPort = "995"
+                            if (p == IncomingProtocol.IMAP && inPort == "995") inPort = "993"
+                        })
+                    }
+                    if (protocol == IncomingProtocol.JMAP) {
+                        LineField(jmapUrl, { jmapUrl = it }, "https://jmap.example.com/.well-known/jmap")
+                    } else {
+                        LineField(inHost, { inHost = it }, "imap.example.com")
+                        Row { LineField(inPort, { inPort = it.filter(Char::isDigit) }, "Port", Modifier.width(90.dp)); Spacer(Modifier.width(12.dp)); SecurityChips(inSec) { inSec = it } }
+                        LineField(user, { user = it }, "Username (usually your address)")
+                    }
+                    CenteredLabel("Sending (SMTP)")
+                    LineField(outHost, { outHost = it }, if (protocol == IncomingProtocol.JMAP) "Not needed for JMAP" else "smtp.example.com")
+                    Row { LineField(outPort, { outPort = it.filter(Char::isDigit) }, "Port", Modifier.width(90.dp)); Spacer(Modifier.width(12.dp)); SecurityChips(outSec) { outSec = it } }
+                    if (inSec == Security.NONE || outSec == Security.NONE) Text("Without encryption your password crosses the network readable. Only for a bridge on this device or your own network.", style = Type.small.copy(color = Palette.Danger), modifier = Modifier.padding(top = 6.dp))
                 }
                 if (configs.size > 1) {
-                    SectionLabel("Other settings found")
-                    for (c in configs.filter { it != chosen }.take(3)) TextAction("${c.displayName} · ${c.protocol}", Palette.Navy, { choose(c) })
+                    CenteredLabel("Other settings found")
+                    for (c in configs.filter { it != chosen }.take(3)) TextAction("${c.displayName} · ${c.protocol}", Palette.Window, { choose(c) })
                 }
+                busy?.let { Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.Center) { ProvenanceMark(true, working = true) } }
             }
-            Spacer(Modifier.height(40.dp))
+            error?.let { Text(it, style = Type.small.copy(color = Palette.Danger), modifier = Modifier.padding(horizontal = gutter, vertical = 8.dp)) }
+            Spacer(Modifier.height(24.dp))
         }
     }
 }

@@ -53,6 +53,7 @@ import dev.aarso.mail.app.ui.accounts.AccountSetupScreen
 import dev.aarso.mail.app.ui.compose.ComposeScreen
 import dev.aarso.mail.app.ui.compose.OutboxScreen
 import dev.aarso.mail.app.ui.compose.WriteRoom
+import dev.aarso.mail.app.ui.components.FirstRun
 import dev.aarso.mail.app.ui.components.Page
 import dev.aarso.mail.app.ui.components.TextAction
 import dev.aarso.mail.app.ui.components.bytes
@@ -92,7 +93,7 @@ fun AppRoot(app: AppState) {
         app.open(screen)
     }
 
-    val needsSetup = accounts.isEmpty() && !settings.onboarded
+    val needsSetup = accounts.isEmpty()
 
     Box(
         Modifier.fillMaxSize().background(Palette.Field)
@@ -111,7 +112,7 @@ fun AppRoot(app: AppState) {
             },
     ) {
         if (needsSetup) {
-            Welcome { app.open(Screen.AccountSetup()) }
+            FirstRun { app.open(Screen.AccountSetup()) }
         } else {
             SpatialShell(
                 controller = shell,
@@ -190,23 +191,6 @@ private fun Bar(text: String, action: String?, onAction: () -> Unit) {
     Row(Modifier.fillMaxWidth().background(Palette.RoomCard).padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(text, style = Type.body.copy(color = Palette.RoomInk), modifier = Modifier.weight(1f).padding(vertical = 8.dp), maxLines = 2)
         if (action != null) TextAction(action, Palette.Window, onAction)
-    }
-}
-
-/** First run: the sentence from home, before there is mail to count. */
-@Composable
-private fun Welcome(onAdd: () -> Unit) {
-    val m = dev.aarso.mail.app.ui.theme.LocalMetrics.current
-    Column(Modifier.fillMaxSize().background(Palette.Field).padding(horizontal = m.gutter).padding(top = 96.dp)) {
-        val style = Type.headline(m)
-        Text("You've got", style = style.copy(color = Palette.Ink))
-        Text("mail.", style = style.copy(color = Palette.Count))
-        Text("Every account,", style = style.copy(color = Palette.Ink))
-        Text("one sentence.", style = style.copy(color = Palette.Window))
-        Spacer(Modifier.padding(top = 32.dp))
-        Text("Gmail, iCloud, Outlook, Yahoo, Fastmail, Proton (via Bridge), and any IMAP, POP3 or JMAP server. Summaries are written on this phone when it can.", style = Type.body.copy(color = Palette.InkDim))
-        Spacer(Modifier.padding(top = 28.dp))
-        dev.aarso.mail.app.ui.components.SolidButton("Add an account", onAdd, background = Palette.Ink, ink = Palette.Field)
     }
 }
 

@@ -42,6 +42,7 @@ import dev.aarso.mail.app.ui.components.LineField
 import dev.aarso.mail.app.ui.components.Page
 import dev.aarso.mail.app.ui.components.SheetChip
 import dev.aarso.mail.app.ui.components.TldrToggle
+import dev.aarso.mail.app.ui.components.plain
 import dev.aarso.mail.app.ui.components.countPhrase
 import dev.aarso.mail.app.ui.reader.ReaderContent
 import dev.aarso.mail.app.ui.theme.LocalMetrics
@@ -88,11 +89,8 @@ fun MailboxScreen(screen: Screen.Mailbox, onBack: () -> Unit) {
     Page(
         title = screen.title,
         onBack = onBack,
-        subtitle = {
-            val total = result?.total
-            Text(if (total != null) countPhrase(total, "message") else " ", style = Type.body.copy(color = Palette.InkDim))
-        },
-        actions = {
+        subtitle = result?.total?.let { countPhrase(it, "message") },
+        toolbar = {
             TldrToggle(settings.tldr, { g.updateSettings { it.copy(tldr = !it.tldr) } })
             IconAction(HyIcons.thread, if (settings.conversationView) "Show every message" else "Group conversations", if (settings.conversationView) Palette.Ink else Palette.InkDim, {
                 g.updateSettings { it.copy(conversationView = !it.conversationView) }
@@ -145,7 +143,7 @@ fun MailboxScreen(screen: Screen.Mailbox, onBack: () -> Unit) {
         Hairline()
         if (m.wide) {
             Row(Modifier.fillMaxSize()) {
-                MessageList(list, settings.tldr, onOpen = { id, _ -> opened = id }, modifier = Modifier.weight(0.42f).fillMaxHeight(), focusedId = opened)
+                MessageList(list, settings.tldr, onOpen = { id, _ -> opened = id }, modifier = Modifier.weight(0.42f).fillMaxHeight(), focusedId = opened, empty = listOf(plain("${screen.title} is empty.")))
                 Box(Modifier.width(1.dp).fillMaxHeight().background(Palette.Hairline))
                 Box(Modifier.weight(0.58f).fillMaxHeight()) {
                     val id = opened
@@ -164,7 +162,7 @@ fun MailboxScreen(screen: Screen.Mailbox, onBack: () -> Unit) {
                 }
             }
         } else {
-            MessageList(list, settings.tldr, onOpen = { id, siblings -> app.open(Screen.Reader(id, siblings)) }, modifier = Modifier.fillMaxSize())
+            MessageList(list, settings.tldr, onOpen = { id, siblings -> app.open(Screen.Reader(id, siblings)) }, modifier = Modifier.fillMaxSize(), empty = listOf(plain("${screen.title} is empty.")))
         }
     }
     Spacer(Modifier.height(0.dp))
