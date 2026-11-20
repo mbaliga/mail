@@ -103,6 +103,7 @@ androidComponents {
 dependencies {
     implementation(project(":mail-ai"))
     if (!splitOnDevice) implementation(project(":ondevice-runtime"))
+    implementation(libs.androidx.profileinstaller)
     implementation(libs.play.feature.delivery)
     implementation(libs.play.feature.delivery.ktx)
 

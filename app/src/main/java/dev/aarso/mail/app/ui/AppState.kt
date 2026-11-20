@@ -49,6 +49,8 @@ interface ActivityBridge {
     fun launch(intent: Intent)
     /** Ask for POST_NOTIFICATIONS (Android 13+) — once there is mail to notify about. */
     fun requestNotifications()
+    /** Ask for a runtime permission; true if granted. */
+    suspend fun requestPermission(permission: String): Boolean
 }
 
 val LocalBridge = staticCompositionLocalOf<ActivityBridge> { error("No ActivityBridge") }

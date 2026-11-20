@@ -75,6 +75,7 @@ fun MailboxScreen(screen: Screen.Mailbox, onBack: () -> Unit) {
     val list = rememberListController(key = "box:${screen.title}:${screen.query}:${screen.accountIds}:${screen.mailboxIds}", query = screen.query, scope = base, natural = true)
     if (list.searchScope.collapseThreads != settings.conversationView) list.searchScope = list.searchScope.copy(collapseThreads = settings.conversationView)
     val result by list.result.collectAsState()
+    val totalMatches by list.total.collectAsState()
     var text by rememberSaveable(screen) { mutableStateOf(screen.query) }
     var sortMenu by remember { mutableStateOf(false) }
     var saveMenu by remember { mutableStateOf(false) }
@@ -89,7 +90,7 @@ fun MailboxScreen(screen: Screen.Mailbox, onBack: () -> Unit) {
     Page(
         title = screen.title,
         onBack = onBack,
-        subtitle = result?.total?.let { countPhrase(it, "message") },
+        subtitle = totalMatches?.let { countPhrase(it, "message") },
         toolbar = {
             TldrToggle(settings.tldr, { g.updateSettings { it.copy(tldr = !it.tldr) } })
             IconAction(HyIcons.thread, if (settings.conversationView) "Show every message" else "Group conversations", if (settings.conversationView) Palette.Ink else Palette.InkDim, {

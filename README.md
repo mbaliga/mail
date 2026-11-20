@@ -71,6 +71,13 @@ provenance mark — a filled radium disc for *this phone*, a hollow cyan ring fo
 the Claude API's **server-side refusal fallback** (`server-side-fallback-2026-07-01`), so a refused
 answer is retried on a fallback model by the API rather than failing.
 
+## Moving around, finding, attaching, and speed
+
+- **Section switcher.** The hamburger opens a card stack: a compact label list on the left follows a vertical pager of gradient cards. Four levels: *Home* (how much mail you've got), *All accounts* (Inbox, Outbox, Sent, Drafts, Trash, Spam…), *Views* (your saved searches) and *Accounts* — pick one to drill into its own folders.
+- **Search.** One grammar for everything (typed or natural language). Typeahead completes operators, people, folders, categories and dates; results show the matching snippet with the hit in bold; "Refine" chips are facets (sender, year, category, has files, unread) computed from the current results.
+- **Attach by asking.** In compose, the mail icon opens a live search ("the conversation with Priya about the lease in March"). Attach the messages as `.eml`, quote them, or hand them to the writing assistant as background (sensitivity checks still apply). A just-taken screenshot or copied clipboard content is offered as a one-tap suggestion; the clipboard is only peeked at (type and age) until you accept, and screenshots need the optional photo permission (Play review may ask you to justify `READ_MEDIA_IMAGES`; the feature is off until you opt in).
+- **Speed.** `PerfTest` seeds 100,000 messages and enforces budgets. Typical times on a JVM dev machine: list a folder ≈ 5 ms, 1,500 rows ≈ 19 ms, FTS word search ≈ 55 ms, natural language ≈ 1.5 ms. Totals are counted after the rows appear, so lists never wait on counting. Startup builds the database off the main thread, and a hand-written baseline profile is included (not measured on a device). Run `./gradlew :mail-core:test -Dmail.perf.n=100000`.
+
 ## Architecture
 
 ```

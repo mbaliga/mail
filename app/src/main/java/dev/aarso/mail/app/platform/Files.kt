@@ -47,6 +47,32 @@ class Files(private val context: Context) : AttachmentLoader {
         return File(folder, safe)
     }
 
+    private val outgoingDir by lazy { File(context.filesDir, "outgoing").apply { mkdirs() } }
+
+    /**
+     * A durable copy for an outgoing attachment. Cached files can be evicted by the system before a
+     * message scheduled for next week goes out; these live in private storage until nothing refers to
+     * them ([prune]).
+     */
+    suspend fun stage(bytes: ByteArray, name: String, mime: String): DraftAttachment = withContext(Dispatchers.IO) {
+        val f = File(outgoingDir, "${System.nanoTime()}-" + name.replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001F]"), "_").take(100).ifBlank { "file" })
+        f.writeBytes(bytes)
+        DraftAttachment(FileProvider.getUriForFile(context, "${context.packageName}.files", f).toString(), name, mime, bytes.size.toLong())
+    }
+
+    /** Copy something another app shared (a screenshot, a clipboard image) into [stage]'s storage. */
+    suspend fun stageFrom(uri: Uri, name: String, mime: String): DraftAttachment? = withContext(Dispatchers.IO) {
+        val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() ?: return@withContext null
+        stage(bytes, name, mime)
+    }
+
+    /** Remove staged files older than [olderThanMs] that no draft or outbox row refers to. */
+    fun prune(inUse: Set<String>, olderThanMs: Long = 24 * 3_600_000L) {
+        val cutoff = System.currentTimeMillis() - olderThanMs
+        val keep = inUse.mapNotNull { runCatching { Uri.parse(it).lastPathSegment }.getOrNull() }.toSet()
+        outgoingDir.listFiles()?.forEach { if (it.lastModified() < cutoff && it.name !in keep) it.delete() }
+    }
+
     /** A content:// URI another app can open, for bytes we hold. */
     suspend fun shareable(bytes: ByteArray, name: String, dir: String = "attachments"): Uri = withContext(Dispatchers.IO) {
         val f = cacheFile(dir, name)

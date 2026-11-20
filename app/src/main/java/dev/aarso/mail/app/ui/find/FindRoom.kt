@@ -99,9 +99,21 @@ fun FindRoom(onOpen: (Screen) -> Unit) {
 
     LaunchedEffect(Unit) { snapshotFlow { text }.debounce(220).collect { live = it.trim() } }
 
+    // Typeahead: operators as you start a word, then people / folders / values for the operator you are on.
+    val suggestions by produceState(emptyList<dev.aarso.mail.search.Suggestion>(), text) {
+        value = runCatching { g.suggest.suggest(text) }.getOrDefault(emptyList())
+    }
     val list = rememberListController(key = "find", query = "", scope = SearchScope(), sort = SortOrder.RELEVANCE, natural = true)
     if (list.query != live) list.query = live
     val result by list.result.collectAsState()
+    val totalMatches by list.total.collectAsState()
+    val snippets by produceState(emptyMap<Long, String>(), result) {
+        value = result?.let { r -> runCatching { g.search.snippets(r.parsed, r.headers.map { it.id }) }.getOrDefault(emptyMap()) } ?: emptyMap()
+    }
+    // "Refine": what these results are made of, one tap to narrow by it.
+    val facets by produceState<dev.aarso.mail.search.MailSearch.Facets?>(null, live) {
+        value = if (live.isBlank()) null else runCatching { g.search.facets(g.search.parse(live, natural = true)) }.getOrNull()
+    }
 
     fun addRecent(q: String) = scope.launch {
         if (q.isBlank()) return@launch
@@ -118,6 +130,15 @@ fun FindRoom(onOpen: (Screen) -> Unit) {
                 keyboardActions = KeyboardActions(onSearch = { live = text.trim(); addRecent(live) }),
                 trailing = { if (text.isNotEmpty()) IconAction(HyIcons.close, "Clear", Palette.RoomInk, { text = ""; live = ""; answer = null }) },
             )
+            if (suggestions.isNotEmpty()) {
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (sg in suggestions) RoomChip(
+                        sg.label + (sg.detail?.takeIf { sg.kind == dev.aarso.mail.search.Suggestion.Kind.OPERATOR }?.let { "  · $it" } ?: ""),
+                        false,
+                        { text = sg.apply(text).let { t -> if (sg.kind == dev.aarso.mail.search.Suggestion.Kind.OPERATOR) t else "$t " } },
+                    )
+                }
+            }
             val parsed = result?.parsed
             if (parsed != null && live.isNotEmpty()) {
                 val chips = parsed.chips
@@ -169,7 +190,7 @@ fun FindRoom(onOpen: (Screen) -> Unit) {
         } else {
             // ---- results ----
             Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(result?.total?.let { countPhrase(it, "result") } ?: "", style = Type.label.copy(color = Palette.RoomInkDim), modifier = Modifier.padding(start = 10.dp).weight(1f))
+                Text(totalMatches?.let { countPhrase(it, "result") } ?: "", style = Type.label.copy(color = Palette.RoomInkDim), modifier = Modifier.padding(start = 10.dp).weight(1f))
                 TextAction(if (serverBusy) "Searching servers…" else serverHits?.let { "Servers: $it more" } ?: "Search servers too", Palette.Window, {
                     if (serverBusy) return@TextAction
                     serverBusy = true
@@ -204,11 +225,25 @@ fun FindRoom(onOpen: (Screen) -> Unit) {
                     )
                 }
             }
+            facets?.let { f ->
+                val chips = buildList {
+                    f.senders.filter { it.third < f.sampled }.take(3).forEach { (addr, name, n) -> add(((name ?: addr).substringBefore(' ')) + " ($n)" to "from:$addr") }
+                    f.categories.filter { it.second < f.sampled }.take(3).forEach { (c, n) -> add("${c.label} ($n)" to "category:${c.key}") }
+                    f.years.filter { it.second < f.sampled }.take(2).forEach { (y, n) -> add("$y ($n)" to "date:$y") }
+                    if (f.withAttachments in 1 until f.sampled) add("With files (${f.withAttachments})" to "has:attachment")
+                    if (f.unread in 1 until f.sampled) add("Unread (${f.unread})" to "is:unread")
+                }
+                if (chips.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Refine", style = Type.caps.copy(color = Palette.RoomInkDim), modifier = Modifier.padding(end = 4.dp, top = 8.dp))
+                    for ((label, term) in chips) RoomChip(label, false, { text = (text.trimEnd() + " " + term).trim() })
+                }
+            }
             MailSheet(Modifier.fillMaxSize().imePadding()) {
                 MessageList(
                     controller = list,
                     tldr = settings.tldr,
                     onOpen = { id, siblings -> addRecent(live); onOpen(Screen.Reader(id, siblings)) },
+                    snippets = snippets,
                     empty = listOf(plain("No mail matches. "), action("Search the servers", {
                         if (!serverBusy) { serverBusy = true; scope.launch { var n = 0; for (a in g.accountsNow().filter { it.enabled }) n += runCatching { g.sync.serverSearch(a, live).size }.getOrDefault(0); serverHits = n; serverBusy = false } }
                     }), plain(" for older mail.")),

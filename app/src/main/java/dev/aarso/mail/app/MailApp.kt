@@ -6,8 +6,15 @@ import dev.aarso.mail.app.platform.Work
 
 open class MailApp : Application() {
 
-    lateinit var graph: AppGraph
-        private set
+    private val ready = kotlinx.coroutines.CompletableDeferred<AppGraph>()
+
+    /**
+     * Everything the app owns. Built on a background thread from [onCreate] — opening the database,
+     * loading the SQLite natives and the Keystore key take a few tens of milliseconds, and the
+     * framework meanwhile creates the Activity. Whoever needs it first waits for the rest.
+     */
+    val graph: AppGraph
+        get() = if (ready.isCompleted) ready.getCompleted() else kotlinx.coroutines.runBlocking { ready.await() }
 
     override fun attachBaseContext(base: android.content.Context) {
         super.attachBaseContext(base)
@@ -19,15 +26,18 @@ open class MailApp : Application() {
         super.onCreate()
         val label = getString(R.string.app_name)
         CrashRecovery.install(this, label)
-        try {
-            graph = AppGraph(this)
-        } catch (t: Throwable) {
-            // A store that cannot open (disk full, corrupted file) gets the recovery screen, not a loop.
-            CrashRecovery.captureInitError(this, label, t)
-            throw t
-        }
-        graph.notifier.createChannels()
-        Work.schedulePeriodic(this, graph.settings.value.pollMinutes)
-        graph.start()
+        Thread({
+            try {
+                val g = AppGraph(this)
+                g.notifier.createChannels()
+                Work.schedulePeriodic(this, g.settings.value.pollMinutes)
+                g.start()
+                ready.complete(g)
+            } catch (t: Throwable) {
+                // A store that cannot open (disk full, corrupted file) gets the recovery screen, not a loop.
+                CrashRecovery.captureInitError(this, label, t)
+                ready.completeExceptionally(t)
+            }
+        }, "graph-init").start()
     }
 }

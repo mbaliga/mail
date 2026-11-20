@@ -1,5 +1,6 @@
 package dev.aarso.mail.app
 
+import dev.aarso.mail.app.ui.compose.AttachMailContent
 import android.app.Application
 import android.app.PendingIntent
 import android.content.Intent
@@ -9,6 +10,8 @@ import androidx.activity.result.ActivityResult
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,6 +27,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
 import androidx.test.core.app.ApplicationProvider
@@ -143,6 +147,7 @@ class ScreensTest {
             for (h in stored) graph.store.updateDerived(h.id, category = h.category, tldr = h.tldr, tldrSource = h.tldrSource, otp = h.otpCode)
             firstId = stored.first().id
             graph.store.saveBody(MessageBody(firstId, text = "Hi Mi,\n\nGood news — the duplicate charge from 2 November has been refunded. It can take 5–10 working days to appear on your statement.\n\nIs there anything else I can help with?\n\nFin\nAnthropic support\n\n> On Mon, Mi wrote:\n> I was charged twice this month.", fetchedAt = now), stored.first())
+            graph.store.recordContacts(listOf(EmailAddress("priya@example.com", "Priya Raman"), EmailAddress("marcus@example.com", "Marcus Lee")), sentByMe = true, at = now)
             graph.store.saveRule(MailRule(name = "Old newsletters", query = "category:newsletters older_than:7d in:inbox", actions = listOf(RuleAction.Archive)))
             graph.search.refreshAccounts()
         }
@@ -158,6 +163,7 @@ class ScreensTest {
             override suspend fun createDocument(name: String, mime: String): Uri? = null
             override fun launch(intent: Intent) {}
             override fun requestNotifications() {}
+            override suspend fun requestPermission(permission: String) = false
         }
         rule.setContent {
             MailTheme { CompositionLocalProvider(LocalApp provides state, LocalBridge provides bridge) { content() } }
@@ -215,7 +221,29 @@ class ScreensTest {
 
     @Test fun outbox() = show("outbox-empty", waitFor = "waiting to send") { dev.aarso.mail.app.ui.compose.OutboxScreen {} }
 
-    @Test fun places() = show("room-places", waitFor = "Inbox") { PlacesRoom {} }
+    @Test fun attachSheet() = show("attach-sheet", waitFor = "Attach mail") {
+        Column(Modifier.fillMaxSize().background(Color.White).padding(horizontal = 24.dp, vertical = 32.dp)) {
+            AttachMailContent { _, _, _ -> }
+        }
+    }
+
+    @Test fun findTypeahead() {
+        show("find-typeahead", waitFor = "TRY") { FindRoom {} }
+        rule.onNode(androidx.compose.ui.test.hasSetTextAction()).performTextInput("from:pri")
+        rule.waitUntil(8_000) { rule.onAllNodesWithText("Priya", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        rule.onRoot().captureRoboImage("build/screens/find-typeahead.png")
+    }
+
+    @Test fun findResults() {
+        show("find-results", waitFor = "TRY") { FindRoom {} }
+        rule.onNode(androidx.compose.ui.test.hasSetTextAction()).performTextInput("refund")
+        rule.waitUntil(8_000) { rule.onAllNodesWithText("Refine", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        rule.onRoot().captureRoboImage("build/screens/find-results.png")
+    }
+
+    @Test fun places() = show("room-places", waitFor = "Inbox") { PlacesRoom({}, {}) }
 
     @Test fun find() = show("room-find", waitFor = "TRY") { FindRoom {} }
 

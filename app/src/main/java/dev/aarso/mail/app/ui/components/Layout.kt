@@ -51,6 +51,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -304,4 +305,27 @@ fun BrandSplash(modifier: Modifier = Modifier) {
             contentScale = ContentScale.FillWidth, alignment = Alignment.BottomStart,
         )
     }
+}
+
+/** A search snippet with its matched words in bold; the markers are [dev.aarso.mail.search.MailSearch.HIT_START] / HIT_END. */
+@Composable
+fun Highlighted(text: String, style: TextStyle, modifier: Modifier = Modifier, maxLines: Int = 2, hit: Color = Palette.SheetInk) {
+    val annotated = remember(text, hit) {
+        buildAnnotatedString {
+            var inHit = false
+            val sb = StringBuilder()
+            fun flush() {
+                if (sb.isEmpty()) return
+                if (inHit) withStyle(SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = hit)) { append(sb.toString()) } else append(sb.toString())
+                sb.clear()
+            }
+            for (c in text) when (c) {
+                dev.aarso.mail.search.MailSearch.HIT_START -> { flush(); inHit = true }
+                dev.aarso.mail.search.MailSearch.HIT_END -> { flush(); inHit = false }
+                else -> sb.append(c)
+            }
+            flush()
+        }
+    }
+    Text(annotated, style = style, maxLines = maxLines, overflow = TextOverflow.Ellipsis, modifier = modifier)
 }

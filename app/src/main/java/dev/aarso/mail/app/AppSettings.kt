@@ -33,6 +33,12 @@ data class AppSettings(
     val loadRemoteImages: Boolean = false,
     // ---- Sending ----
     val undoSendSeconds: Int = 10,
+    /** While writing, offer the latest screenshot (needs photo access, so off until asked for). */
+    val suggestScreenshots: Boolean = false,
+    /** While writing, offer what was just copied (the clipboard is only peeked at, never read, until accepted). */
+    val suggestClipboard: Boolean = true,
+    /** The one-time "turn on screenshot suggestions?" prompt was answered. */
+    val screenshotPromptDismissed: Boolean = false,
     // ---- Notifications ----
     val notify: Map<Category, NotifyLevel> = mapOf(
         Category.OTP to NotifyLevel.URGENT, Category.REPLIES to NotifyLevel.URGENT, Category.PEOPLE to NotifyLevel.NORMAL,

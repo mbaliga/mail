@@ -66,19 +66,34 @@ class ListController(
     private val _result = MutableStateFlow<SearchResult?>(null)
     val result: StateFlow<SearchResult?> = _result.asStateFlow()
 
+    private val _total = MutableStateFlow<Int?>(null)
+    /** How many messages match in all. Arrives after the rows: counting is far slower than listing. */
+    val total: StateFlow<Int?> = _total.asStateFlow()
+    private var countJob: Job? = null
+
     val items: StateFlow<List<MessageHeader>> = snapshotFlow { Quad(query, searchScope, sort, limit) }
         .distinctUntilChanged()
         .flatMapLatest { (q, s, o, l) ->
             graph.store.observeMessages {
-                runCatching { graph.search.search(graph.search.parse(q, natural), s, o, l) }.getOrNull()
+                runCatching { graph.search.search(graph.search.parse(q, natural), s, o, l, countTotal = false) }.getOrNull()?.let { Triple(it, q, s) }
             }
         }
-        .map { r -> _result.value = r; r?.headers.orEmpty() }
+        .map { t ->
+            val r = t?.first
+            _result.value = r
+            countJob?.cancel()
+            if (r != null) {
+                if (r.total != null) _total.value = r.total
+                else countJob = scope.launch { _total.value = runCatching { graph.search.count(r.parsed, t.third) }.getOrNull() }
+            }
+            r?.headers.orEmpty()
+        }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     fun loadMore() {
         val r = _result.value ?: return
-        if (r.headers.size >= limit && (r.total == null || r.total!! > r.headers.size)) limit += PAGE
+        val all = _total.value
+        if (r.headers.size >= limit && (all == null || all > r.headers.size)) limit += PAGE
     }
 
     // ---- selection ----

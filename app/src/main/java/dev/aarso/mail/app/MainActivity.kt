@@ -58,6 +58,8 @@ class MainActivity : ComponentActivity(), ActivityBridge {
         override fun parseResult(resultCode: Int, intent: Intent?): Uri? = intent?.data.takeIf { resultCode == RESULT_OK }
     }) { pendingCreate?.complete(it) }
     private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    private var pendingPermission: CompletableDeferred<Boolean>? = null
+    private val permission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { pendingPermission?.complete(it) }
 
     override val activity get() = this
 
@@ -82,6 +84,13 @@ class MainActivity : ComponentActivity(), ActivityBridge {
     override suspend fun createDocument(name: String, mime: String): Uri? {
         val d = CompletableDeferred<Uri?>().also { pendingCreate = it }
         createDoc.launch(name to mime)
+        return d.await()
+    }
+
+    override suspend fun requestPermission(permission: String): Boolean {
+        if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) return true
+        val d = CompletableDeferred<Boolean>().also { pendingPermission = it }
+        this.permission.launch(permission)
         return d.await()
     }
 

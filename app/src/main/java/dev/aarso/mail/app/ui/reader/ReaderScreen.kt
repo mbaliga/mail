@@ -164,8 +164,7 @@ fun ReaderContent(h: MessageHeader, onDone: () -> Unit, onNavigate: (Int) -> Uni
         // Attachments travel with a forward: fetch them now so the outbox can send offline later.
         val atts = h.parts.filter { it.isAttachment }.mapNotNull { p ->
             val bytes = runCatching { g.sync.fetchPart(h.id, p) }.getOrNull() ?: return@mapNotNull null
-            val uri = g.files.shareable(bytes, p.fileName ?: "attachment", "forward/${h.id}")
-            dev.aarso.mail.model.DraftAttachment(uri.toString(), p.fileName ?: "attachment", p.mimeType, bytes.size.toLong())
+            g.files.stage(bytes, p.fileName ?: "attachment", p.mimeType)
         }
         app.compose(Drafts.forward(a, h, body, atts))
     }

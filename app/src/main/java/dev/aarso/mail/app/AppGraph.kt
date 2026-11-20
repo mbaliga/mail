@@ -70,6 +70,7 @@ class AppGraph(val context: Context) {
     val http: OkHttpClient = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
     val connector = AccountConnector(secrets, tokens, TransportFactory.DEFAULT, http)
     val files = Files(context)
+    val attachSuggestions = dev.aarso.mail.app.platform.AttachSuggestions(context)
     val notifier = Notifier(context)
     val discovery = AutoDiscovery(http)
 
@@ -78,6 +79,7 @@ class AppGraph(val context: Context) {
     val outbox = Outbox(store, connector, actions, files)
     val search = MailSearch(store)
     val selection = SelectionEngine(search)
+    val suggest = dev.aarso.mail.search.SearchSuggest(store, search)
     val digest = DigestBuilder(search)
 
     // ---- settings ----
@@ -186,6 +188,11 @@ class AppGraph(val context: Context) {
             for (c in settings.value.cloudEngines) secrets.get(SecretRef(c.keyRef))?.let { apiKeys[c.keyRef] = it }
             search.refreshAccounts()
             accounts.collect { search.refreshAccounts() }
+        }
+        scope.launch {
+            // Staged attachments nothing refers to any more (a discarded draft, a sent message) go.
+            val used = store.drafts().flatMap { d -> d.attachments.map { it.uri } } + store.outbox().flatMap { o -> o.draft.attachments.map { it.uri } }
+            runCatching { files.prune(used.toSet()) }
         }
         scope.launch {
             // First run of a new process: anything due while we were dead goes out / comes back now.

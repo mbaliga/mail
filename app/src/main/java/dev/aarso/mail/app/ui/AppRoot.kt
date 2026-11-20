@@ -119,7 +119,7 @@ fun AppRoot(app: AppState) {
                 accentColor = Palette.Accent,
                 scrimColor = Palette.Room,
                 cardColor = Palette.Field,
-                left = { PlacesRoom(::go) },
+                left = { PlacesRoom(::go, onHome = { shell.closeAll() }) },
                 right = { FindRoom(::go) },
                 top = { RulesRoom(::go) },
                 bottom = { WriteRoom(::go) },

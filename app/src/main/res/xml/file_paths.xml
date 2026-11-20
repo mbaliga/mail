@@ -3,4 +3,6 @@
      served from here; nothing outside the cache directory is ever exposed. -->
 <paths>
     <cache-path name="cache" path="." />
+    <!-- Staged outgoing attachments: durable until the message is sent (or the draft is gone). -->
+    <files-path name="outgoing" path="outgoing/" />
 </paths>

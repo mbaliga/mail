@@ -45,7 +45,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.mutableStateListOf
+import dev.aarso.mail.ai.MailAi
 import dev.aarso.mail.ai.RewriteStyle
+import dev.aarso.mail.app.platform.AttachSuggestions
+import dev.aarso.mail.mime.Eml
 import dev.aarso.mail.app.ui.LocalApp
 import dev.aarso.mail.app.ui.LocalBridge
 import dev.aarso.mail.app.ui.components.Hairline
@@ -60,6 +64,7 @@ import dev.aarso.mail.app.ui.components.SheetChip
 import dev.aarso.mail.app.ui.components.SolidButton
 import dev.aarso.mail.app.ui.components.TextAction
 import dev.aarso.mail.app.ui.components.bytes
+import dev.aarso.mail.app.ui.components.countPhrase
 import dev.aarso.mail.app.ui.components.fullWhen
 import dev.aarso.mail.app.ui.list.MailBottomSheet
 import dev.aarso.mail.app.ui.list.MomentSheet
@@ -95,6 +100,64 @@ fun ComposeScreen(initial: Draft, onClose: () -> Unit) {
     var later by remember { mutableStateOf(false) }
     var followUp by remember { mutableStateOf(false) }
     var assist by remember { mutableStateOf(false) }
+    var attachMail by remember { mutableStateOf(false) }
+    var context by remember { mutableStateOf(MailAi.DraftContext()) }
+    var shot by remember { mutableStateOf<AttachSuggestions.Screenshot?>(null) }
+    var clip by remember { mutableStateOf<AttachSuggestions.Clip?>(null) }
+    val dismissed = remember { mutableStateListOf<String>() }
+
+    // What is worth offering right now. Re-checked whenever the person comes back to this screen,
+    // which is exactly when "I just took a screenshot / copied something" has happened.
+    fun refreshSuggestions() {
+        val sug = g.attachSuggestions
+        clip = if (settings.suggestClipboard) sug.recentClip()?.takeIf { it.key !in dismissed } else null
+        if (settings.suggestScreenshots && sug.hasPhotoAccess()) scope.launch { shot = sug.latestScreenshot()?.takeIf { "shot:${it.uri}" !in dismissed } } else shot = null
+    }
+    androidx.lifecycle.compose.LifecycleResumeEffect(settings.suggestClipboard, settings.suggestScreenshots) {
+        refreshSuggestions()
+        onPauseOrDispose { }
+    }
+
+    fun addAttachment(a: dev.aarso.mail.model.DraftAttachment) { draft = draft.copy(attachments = draft.attachments + a) }
+
+    fun takeClip(asContext: Boolean) = scope.launch {
+        val c = clip ?: return@launch
+        val (text, uri) = g.attachSuggestions.readClip()
+        dismissed += c.key; clip = null
+        when {
+            uri != null -> {
+                val ext = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(c.mime)?.let { ".$it" }.orEmpty()
+                val name = (if (c.kind == AttachSuggestions.ClipKind.IMAGE) "Copied image" else "Copied file") + ext
+                g.files.stageFrom(uri, name, c.mime)?.let(::addAttachment) ?: app.say("Couldn't read what was copied")
+            }
+            text != null && asContext -> { context = context.copy(notes = context.notes + text); app.say("Using it as background for the draft") }
+            text != null -> addAttachment(g.files.stage(text.toByteArray(), "Copied text.txt", "text/plain"))
+        }
+    }
+
+    fun pickMail(headers: List<dev.aarso.mail.model.MessageHeader>, mode: AttachMode, whole: Boolean) = scope.launch {
+        attachMail = false
+        val all = headers.flatMap { h -> if (whole) g.store.threadMessages(h.threadKey, h.accountId).ifEmpty { listOf(h) } else listOf(h) }
+            .distinctBy { it.id }.sortedBy { it.receivedAt }
+        when (mode) {
+            AttachMode.EML -> {
+                for (m in all) {
+                    // The server's original keeps inline images and attachments; offline, rebuild it from what is stored.
+                    val raw = runCatching { kotlinx.coroutines.withTimeout(5_000) { g.sync.fetchRaw(m.id) } }.getOrNull() ?: Eml.build(m, g.store.body(m.id))
+                    addAttachment(g.files.stage(raw, Eml.fileName(m), "message/rfc822"))
+                }
+                app.say("Attached ${countPhrase(all.size, "message")}")
+            }
+            AttachMode.QUOTE -> {
+                draft = draft.copy(textBody = draft.textBody.trimEnd() + "\n\n" + Eml.quote(all.map { it to g.store.body(it.id) }))
+                app.say("Quoted ${countPhrase(all.size, "message")}")
+            }
+            AttachMode.CONTEXT -> {
+                context = context.copy(messages = (context.messages + all.map { it to g.store.body(it.id) }).distinctBy { it.first.id })
+                app.say("The assistant will use ${countPhrase(all.size, "message")} as background")
+            }
+        }
+    }
     var fromMenu by remember { mutableStateOf(false) }
     var sent by remember { mutableStateOf(false) }
 
@@ -150,6 +213,7 @@ fun ComposeScreen(initial: Draft, onClose: () -> Unit) {
                     if (uris.isNotEmpty()) draft = draft.copy(attachments = draft.attachments + uris.map { g.files.describe(it) })
                 }
             })
+            IconAction(HyIcons.mail, "Attach mail", Palette.Ink, { attachMail = true })
             IconAction(HyIcons.sparkle, "Help me write", Palette.Ink, { assist = true })
         },
         footer = { PageFooter(primary = "Send", onPrimary = { send() }, secondary = "Send later", onSecondary = { later = true }) },
@@ -178,6 +242,47 @@ fun ComposeScreen(initial: Draft, onClose: () -> Unit) {
             }
             LineField(draft.subject, { draft = draft.copy(subject = it) }, "Subject", style = Type.body)
 
+            // ---- offers: one at a time, newest thing first ----
+            val s = shot
+            val c = clip
+            when {
+                s != null -> SuggestionRow(
+                    "You just took a screenshot. Attach it?",
+                    onAccept = { scope.launch { g.files.stageFrom(s.uri, s.name, s.mime)?.let(::addAttachment); dismissed += "shot:${s.uri}"; shot = null } },
+                    onDismiss = { dismissed += "shot:${s.uri}"; shot = null },
+                    thumbnail = { ScreenshotThumb(s) },
+                )
+                c != null && c.kind == AttachSuggestions.ClipKind.TEXT -> SuggestionRow(
+                    "You copied some text.",
+                    acceptLabel = "Attach", onAccept = { takeClip(false) },
+                    secondLabel = "Use as context", onSecond = { takeClip(true) },
+                    onDismiss = { dismissed += c.key; clip = null },
+                )
+                c != null -> SuggestionRow("You copied ${c.label}. Attach it?", onAccept = { takeClip(false) }, onDismiss = { dismissed += c.key; clip = null })
+                !settings.suggestScreenshots && !settings.screenshotPromptDismissed -> SuggestionRow(
+                    "Offer your latest screenshot here when you've just taken one? Needs access to your photos.",
+                    acceptLabel = "Turn on",
+                    onAccept = {
+                        scope.launch {
+                            val ok = bridge.requestPermission(android.Manifest.permission.READ_MEDIA_IMAGES)
+                            g.updateSettings { it.copy(suggestScreenshots = ok, screenshotPromptDismissed = true) }
+                        }
+                    },
+                    onDismiss = { g.updateSettings { it.copy(screenshotPromptDismissed = true) } },
+                )
+            }
+            if (!context.isEmpty) {
+                FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SheetChip(
+                        "Background for the assistant: " + listOfNotNull(
+                            context.messages.size.takeIf { it > 0 }?.let { countPhrase(it, "message") },
+                            context.notes.size.takeIf { it > 0 }?.let { countPhrase(it, "note") },
+                        ).joinToString(" and "),
+                        true, { context = MailAi.DraftContext() },
+                        leading = { HyIcon(HyIcons.close, "Clear", androidx.compose.ui.graphics.Color.White, size = 12.dp) },
+                    )
+                }
+            }
             if (draft.attachments.isNotEmpty()) {
                 FlowRow(Modifier.padding(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (a in draft.attachments) SheetChip("${a.fileName} · ${bytes(a.size)}", false, { draft = draft.copy(attachments = draft.attachments - a) }, leading = { HyIcon(HyIcons.close, "Remove", Palette.SheetInk, size = 12.dp) })
@@ -213,7 +318,8 @@ fun ComposeScreen(initial: Draft, onClose: () -> Unit) {
 
     if (later) MomentSheet("Send at", { later = false }, { at -> later = false; send(at) })
     if (followUp) MomentSheet("Nudge me if there's no reply by", { followUp = false }, { at -> followUp = false; draft = draft.copy(followUpAt = at) })
-    if (assist) AssistSheet(draft, onDismiss = { assist = false }, onText = { draft = draft.copy(textBody = it) })
+    if (assist) AssistSheet(draft, context, onDismiss = { assist = false }, onText = { draft = draft.copy(textBody = it) })
+    if (attachMail) AttachMailSheet(onDismiss = { attachMail = false }, onPick = { hs, mode, whole -> pickMail(hs, mode, whole) })
 }
 
 /** Addresses as chips; typing shows people you have actually written to first. */
@@ -260,7 +366,7 @@ private fun RecipientField(label: String, recipients: List<EmailAddress>, onChan
 
 /** Draft from a sentence, or rewrite what is there — streamed, with where it ran shown. */
 @Composable
-private fun AssistSheet(draft: Draft, onDismiss: () -> Unit, onText: (String) -> Unit) {
+private fun AssistSheet(draft: Draft, context: MailAi.DraftContext, onDismiss: () -> Unit, onText: (String) -> Unit) {
     val app = LocalApp.current
     val g = app.graph
     val scope = rememberCoroutineScope()
@@ -284,7 +390,7 @@ private fun AssistSheet(draft: Draft, onDismiss: () -> Unit, onText: (String) ->
                     val replyTo = draft.sourceMessageId?.let { id -> g.store.header(id)?.let { it to g.store.body(id) } }
                     val name = g.accountsNow().firstOrNull { it.id == draft.accountId }?.displayName ?: draft.from.name ?: ""
                     runCatching {
-                        g.ai.draftStream(intent, replyTo, name, onEngine = { onDevice = it.onDevice }).collect { out += it }
+                        g.ai.draftStream(intent, replyTo, name, context = context, onEngine = { onDevice = it.onDevice }).collect { out += it }
                     }
                     if (out.isBlank()) app.say("No model can write right now — check Settings → Intelligence")
                     running = false

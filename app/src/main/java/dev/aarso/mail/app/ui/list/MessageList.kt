@@ -99,6 +99,8 @@ fun MessageList(
     modifier: Modifier = Modifier,
     speakingId: Long? = null,
     focusedId: Long? = null,
+    /** Search snippets by message id, shown under each result (matched words in bold). */
+    snippets: Map<Long, String> = emptyMap(),
     empty: List<dev.aarso.mail.app.ui.components.Bit> = listOf(dev.aarso.mail.app.ui.components.plain("Nothing here.")),
     bottomPadding: Dp = 24.dp,
     header: (LazyListScope.() -> Unit)? = null,
@@ -108,6 +110,7 @@ fun MessageList(
     val m = LocalMetrics.current
     val items by controller.items.collectAsState()
     val result by controller.result.collectAsState()
+    val totalMatches by controller.total.collectAsState()
     val selection by controller.selection.collectAsState()
     val matching by controller.matching.collectAsState()
     val selectedCount by controller.selectedCount.collectAsState()
@@ -158,7 +161,7 @@ fun MessageList(
         if (selecting) {
             SelectionBar(
                 count = selectedCount,
-                total = result?.total,
+                total = totalMatches,
                 allMatching = selection.isQueryBased && selection.included.isEmpty() && selection.excluded.isEmpty(),
                 onClose = { controller.clear() },
                 onSelectAll = { controller.selectAllMatching() },
@@ -209,6 +212,7 @@ fun MessageList(
                         selecting = selecting,
                         speaking = h.id == speakingId,
                         focused = h.id == focusedId || i == cursor,
+                        snippet = snippets[h.id],
                         swipeRight = settings.swipeRight,
                         swipeLeft = settings.swipeLeft,
                         onClick = { if (selecting) controller.toggle(h.id) else { cursor = i; onOpen(h.id, items.map { it.id }) } },
@@ -287,6 +291,7 @@ fun MessageRow(
     selecting: Boolean,
     speaking: Boolean,
     focused: Boolean,
+    snippet: String?,
     swipeRight: SwipeAction,
     swipeLeft: SwipeAction,
     onClick: () -> Unit,
@@ -333,12 +338,12 @@ fun MessageRow(
             }
         },
     ) {
-        RowBody(h, tldr, selected, selecting, speaking, focused, onClick, onLongClick)
+        RowBody(h, tldr, selected, selecting, speaking, focused, snippet, onClick, onLongClick)
     }
 }
 
 @Composable
-private fun RowBody(h: MessageHeader, tldr: Boolean, selected: Boolean, selecting: Boolean, speaking: Boolean, focused: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun RowBody(h: MessageHeader, tldr: Boolean, selected: Boolean, selecting: Boolean, speaking: Boolean, focused: Boolean, snippet: String?, onClick: () -> Unit, onLongClick: () -> Unit) {
     val m = LocalMetrics.current
     val bg = when { selected -> Palette.Select; speaking -> Palette.Select.copy(alpha = 0.6f); focused -> Palette.SheetRaised; else -> Palette.Sheet }
     val ink = if (h.isSeen) Palette.SheetInkRead else Palette.SheetInk
@@ -356,7 +361,10 @@ private fun RowBody(h: MessageHeader, tldr: Boolean, selected: Boolean, selectin
         }
         if (tldr) {
             val line = h.tldr?.takeIf { it.isNotBlank() } ?: listOfNotNull(h.from?.shortName(), h.subject.ifBlank { null }).joinToString(": ")
-            Text(line, style = Type.row(m).copy(color = ink), modifier = Modifier.weight(1f), maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Column(Modifier.weight(1f)) {
+                Text(line, style = Type.row(m).copy(color = ink), maxLines = 3, overflow = TextOverflow.Ellipsis)
+                if (snippet != null) dev.aarso.mail.app.ui.components.Highlighted(snippet, Type.small.copy(color = Palette.SheetInkDim), Modifier.padding(top = 4.dp))
+            }
             val model = h.tldrSource == ClassificationSource.ON_DEVICE_MODEL || h.tldrSource == ClassificationSource.CLOUD_MODEL
             if (model || h.isFlagged || h.hasAttachments) {
                 Column(Modifier.padding(start = 10.dp, top = 8.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -377,7 +385,8 @@ private fun RowBody(h: MessageHeader, tldr: Boolean, selected: Boolean, selectin
                     Text(shortWhen(h.receivedAt), style = Type.small.copy(color = Palette.SheetInkDim))
                 }
                 Text(h.subject.ifBlank { "(no subject)" }, style = Type.body.copy(color = ink), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (h.preview.isNotBlank()) Text(h.preview, style = Type.small.copy(color = Palette.SheetInkDim), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (snippet != null) dev.aarso.mail.app.ui.components.Highlighted(snippet, Type.small.copy(color = Palette.SheetInkDim), maxLines = 2)
+                else if (h.preview.isNotBlank()) Text(h.preview, style = Type.small.copy(color = Palette.SheetInkDim), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
