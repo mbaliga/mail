@@ -174,4 +174,47 @@ class SearchTest {
         val people = digest.tabs.first { it.category == Category.PEOPLE }
         assertEquals(setOf("alice"), keys(search.search(people.query).headers))
     }
+
+    @Test fun `typeahead completes operators, people, folders and values`() = runBlocking {
+        store.recordContacts(listOf(EmailAddress("priya@acme.io", "Priya Raman")), sentByMe = true, at = now)
+        val suggest = SearchSuggest(store, search)
+        // Operators as you start a word.
+        assertTrue(suggest.suggest("fr").any { it.insert == "from:" })
+        assertTrue(suggest.suggest("older").any { it.insert == "older_than:" })
+        // People after from:, and for a bare name.
+        assertEquals("from:priya@acme.io", suggest.suggest("from:pri").first().insert)
+        assertTrue(suggest.suggest("priy").any { it.insert == "from:priya@acme.io" })
+        // Replacement is applied to the token under the caret only.
+        val s = suggest.suggest("invoice from:pri").first()
+        assertEquals("invoice from:priya@acme.io", s.apply("invoice from:pri"))
+        // Folders, categories and fixed words.
+        assertTrue(suggest.suggest("in:tr").any { it.insert == "in:trash" })
+        assertTrue(suggest.suggest("in:rec").any { it.insert == "in:Receipts" })
+        assertTrue(suggest.suggest("category:news").any { it.insert == "category:newsletters" })
+        assertTrue(suggest.suggest("is:un").any { it.insert == "is:unread" })
+        assertTrue(suggest.suggest("has:att").any { it.insert == "has:attachment" })
+        // Negation is kept; an open quote or a trailing space offers nothing.
+        assertEquals("-from:priya@acme.io", suggest.suggest("-from:pri").first().insert)
+        assertTrue(suggest.suggest("\"half a phr").isEmpty())
+        assertTrue(suggest.suggest("invoice ").isEmpty())
+    }
+
+    @Test fun `snippets show why a message matched and facets break results down`() = runBlocking {
+        val parsed = search.parse("invoice", natural = false)
+        val hits = search.search(parsed).headers
+        assertTrue(hits.isNotEmpty())
+        val snippets = search.snippets(parsed, hits.map { it.id })
+        val s = snippets.getValue(ids.getValue("invoice"))
+        assertTrue("matched word is marked: $s", s.contains("${MailSearch.HIT_START}") && s.contains("${MailSearch.HIT_END}"))
+        // Pure filters have no words to highlight.
+        assertTrue(search.snippets(search.parse("is:unread", natural = false), listOf(ids.getValue("alice"))).isEmpty())
+
+        val f = search.facets(search.parse("in:inbox", natural = false))
+        assertEquals(6, f.sampled)
+        assertTrue(f.senders.any { it.first == "alice@friends.net" })
+        assertEquals(1, f.withAttachments)
+        assertEquals(5, f.unread)
+        assertTrue(f.years.any { it.first == 2026 })
+        assertTrue(f.categories.any { it.first == Category.PEOPLE && it.second == 2 })
+    }
 }

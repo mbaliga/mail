@@ -226,21 +226,32 @@ class MailStore(driver: SQLiteDriver, path: String) : AutoCloseable {
     }
 
     /** Arbitrary filtered listing, used by the search engine's SQL pushdown. [where] uses `m.` and `mb.` aliases. */
-    suspend fun queryHeaders(where: String, args: List<Any?>, orderBy: String = "m.received_at DESC", limit: Int = 200, offset: Int = 0): List<MessageHeader> =
+    suspend fun queryHeaders(
+        where: String, args: List<Any?>, orderBy: String = "m.received_at DESC", limit: Int = 200, offset: Int = 0,
+        /**
+         * An FTS5 MATCH expression to rank by (`bm25`, best first). Joined once as a subquery that
+         * the planner evaluates a single time; ranking through a correlated subquery instead
+         * re-runs the full-text match for every candidate row — quadratic, minutes at 100k messages.
+         * [orderBy] may then use `f.r`.
+         */
+        rankedBy: String? = null,
+    ): List<MessageHeader> =
         db.read {
+            val join = if (rankedBy == null) "" else "JOIN (SELECT rowid AS rid, rank AS r FROM message_fts WHERE message_fts MATCH ?) f ON f.rid = m.id"
+            val bound = if (rankedBy == null) args else listOf<Any?>(rankedBy) + args
             query(
-                "SELECT $messageColumns FROM message m JOIN mailbox mb ON mb.id = m.mailbox_id WHERE $where ORDER BY $orderBy LIMIT ? OFFSET ?",
-                *(args + listOf(limit, offset)).toTypedArray(), map = ::mapHeader,
+                "SELECT $messageColumns FROM message m CROSS JOIN mailbox mb ON mb.id = m.mailbox_id $join WHERE $where ORDER BY $orderBy LIMIT ? OFFSET ?",
+                *(bound + listOf(limit, offset)).toTypedArray(), map = ::mapHeader,
             )
         }
 
     suspend fun countWhere(where: String, args: List<Any?>): Int = db.read {
-        scalarLong("SELECT COUNT(*) FROM message m JOIN mailbox mb ON mb.id = m.mailbox_id WHERE $where", *args.toTypedArray())?.toInt() ?: 0
+        scalarLong("SELECT COUNT(*) FROM message m CROSS JOIN mailbox mb ON mb.id = m.mailbox_id WHERE $where", *args.toTypedArray())?.toInt() ?: 0
     }
 
     /** Stream headers matching [where] in [orderBy] order; [each] returns false to stop. For select-all and bulk. */
     suspend fun forEachHeader(where: String, args: List<Any?>, orderBy: String = "m.received_at DESC", each: (MessageHeader) -> Boolean) = db.read {
-        forEach("SELECT $messageColumns FROM message m JOIN mailbox mb ON mb.id = m.mailbox_id WHERE $where ORDER BY $orderBy", *args.toTypedArray()) {
+        forEach("SELECT $messageColumns FROM message m CROSS JOIN mailbox mb ON mb.id = m.mailbox_id WHERE $where ORDER BY $orderBy", *args.toTypedArray()) {
             each(mapHeader(it))
         }
     }
@@ -303,7 +314,7 @@ class MailStore(driver: SQLiteDriver, path: String) : AutoCloseable {
             val placeholder = h.messageId?.let { mid ->
                 scalarLong("SELECT id FROM message WHERE mailbox_id = ? AND uid = 0 AND remote_id IS NULL AND message_id = ? LIMIT 1", h.mailboxId, mid)
             }
-            val byUid = if (h.uid > 0) scalarLong("SELECT id FROM message WHERE mailbox_id = ? AND uid = ?", h.mailboxId, h.uid) else null
+            val byUid = if (h.uid > 0) scalarLong("SELECT id FROM message WHERE mailbox_id = ? AND uid > 0 AND uid = ?", h.mailboxId, h.uid) else null
             val byRemote = h.remoteId?.let { scalarLong("SELECT id FROM message WHERE account_id = ? AND remote_id = ?", h.accountId, it) }
             val existing = placeholder ?: byUid ?: byRemote
             if (existing != null) {
@@ -334,8 +345,8 @@ class MailStore(driver: SQLiteDriver, path: String) : AutoCloseable {
         }
     }
 
-    private fun Conn.indexFts(id: Long, h: MessageHeader, body: String) {
-        exec("DELETE FROM message_fts WHERE rowid = ?", id)
+    private fun Conn.indexFts(id: Long, h: MessageHeader, body: String, isNew: Boolean = true) {
+        if (!isNew) exec("DELETE FROM message_fts WHERE rowid = ?", id)
         exec(
             "INSERT INTO message_fts(rowid, subject, sender, recipients, body, attachments, labels) VALUES (?, ?, ?, ?, ?, ?, ?)",
             id, h.subject, listOfNotNull(h.from?.name, h.from?.address, h.sender?.address).joinToString(" "),
@@ -348,8 +359,8 @@ class MailStore(driver: SQLiteDriver, path: String) : AutoCloseable {
     /** Server-reported flag/label state for existing rows (the cheap half of a resync). */
     suspend fun updateServerState(mailboxId: Long, updates: List<Triple<Long, Int, List<String>?>>) = if (updates.isEmpty()) Unit else db.write(setOf("message", "mailbox")) {
         for ((uid, flags, labels) in updates) {
-            if (labels == null) exec("UPDATE message SET flags = ? WHERE mailbox_id = ? AND uid = ?", flags, mailboxId, uid)
-            else exec("UPDATE message SET flags = ?, labels = ? WHERE mailbox_id = ? AND uid = ?", flags, Labels.encode(labels), mailboxId, uid)
+            if (labels == null) exec("UPDATE message SET flags = ? WHERE mailbox_id = ? AND uid > 0 AND uid = ?", flags, mailboxId, uid)
+            else exec("UPDATE message SET flags = ?, labels = ? WHERE mailbox_id = ? AND uid > 0 AND uid = ?", flags, Labels.encode(labels), mailboxId, uid)
         }
     }
 
@@ -363,8 +374,8 @@ class MailStore(driver: SQLiteDriver, path: String) : AutoCloseable {
     suspend fun deleteByUids(mailboxId: Long, uids: Collection<Long>) = if (uids.isEmpty()) Unit else db.write(setOf("message", "message_fts", "mailbox")) {
         for (chunk in uids.chunked(500)) {
             val list = chunk.joinToString(",")
-            exec("DELETE FROM message_fts WHERE rowid IN (SELECT id FROM message WHERE mailbox_id = ? AND uid IN ($list))", mailboxId)
-            exec("DELETE FROM message WHERE mailbox_id = ? AND uid IN ($list)", mailboxId)
+            exec("DELETE FROM message_fts WHERE rowid IN (SELECT id FROM message WHERE mailbox_id = ? AND uid > 0 AND uid IN ($list))", mailboxId)
+            exec("DELETE FROM message WHERE mailbox_id = ? AND uid > 0 AND uid IN ($list)", mailboxId)
         }
     }
 
@@ -478,7 +489,7 @@ class MailStore(driver: SQLiteDriver, path: String) : AutoCloseable {
             BodyState.FULL.ordinal, maxOf(header.attachmentCount, attachments.size), preview,
             if (attachments.isEmpty()) null else json.encodeToString(partList, attachments), body.messageId,
         )
-        indexFts(body.messageId, header.copy(parts = header.parts.ifEmpty { attachments }), newText.take(64_000))
+        indexFts(body.messageId, header.copy(parts = header.parts.ifEmpty { attachments }), newText.take(64_000), isNew = false)
     }
 
     suspend fun body(messageId: Long): MessageBody? = db.read {

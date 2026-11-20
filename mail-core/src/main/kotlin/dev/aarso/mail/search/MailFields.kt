@@ -47,6 +47,13 @@ abstract class MailFacet(
 class MailFields(
     private val zone: ZoneId = ZoneId.systemDefault(),
     private val accounts: () -> List<Account> = { emptyList() },
+    /**
+     * Whether any account keeps its folders as labels on one "All Mail" box (Gmail). Only then does
+     * `in:inbox` have to look at each message's label column; for everyone else the folder alone
+     * decides, and leaving the label test out lets counts and lists be answered from a narrow index
+     * without reading the rows.
+     */
+    private val labelFolders: () -> Boolean = { true },
 ) {
 
     private fun like(v: String) = "%" + v.lowercase().replace("%", "\\%").replace("_", "\\_") + "%"
@@ -308,7 +315,7 @@ class MailFields(
                     val label = GMAIL_ROLE_LABELS[role]
                     when {
                         role == MailboxRole.ARCHIVE -> SqlPart("(mb.role = 'ARCHIVE' OR (mb.role = 'ALL' AND m.labels NOT LIKE ?))", listOf("%\u001F\\Inbox\u001F%"))
-                        label != null -> SqlPart("(mb.role = ? OR m.labels LIKE ?)", listOf(role.name, "%\u001F$label\u001F%"))
+                        label != null && labelFolders() -> SqlPart("(mb.role = ? OR m.labels LIKE ?)", listOf(role.name, "%\u001F$label\u001F%"))
                         else -> SqlPart("mb.role = ?", listOf(role.name))
                     }
                 }

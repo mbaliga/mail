@@ -42,8 +42,10 @@ class Intelligence(
         val local = if (s.onDeviceEnabled) all.filter { it.onDevice && ready(it) } else emptyList()
         val cloudAllowed = s.cloudEngineId != null &&
             task in s.cloudTasks &&
-            (sensitivity.category == null || sensitivity.category !in s.neverCloudCategories) &&
-            (sensitivity.accountId == null || sensitivity.accountId !in s.neverCloudAccounts) &&
+            sensitivity.all().all { part ->
+                (part.category == null || part.category !in s.neverCloudCategories) &&
+                    (part.accountId == null || part.accountId !in s.neverCloudAccounts)
+            } &&
             (s.dailyCloudTokens == 0L || ledger.used() < s.dailyCloudTokens)
         val cloud = if (cloudAllowed) all.filter { !it.onDevice && it.id == s.cloudEngineId && ready(it) } else emptyList()
         return if (s.preferOnDevice) local + cloud else cloud + local

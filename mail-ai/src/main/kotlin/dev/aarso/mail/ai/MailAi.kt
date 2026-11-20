@@ -187,27 +187,52 @@ class MailAi(
     // Writing
     // ------------------------------------------------------------------------------------------
 
-    private fun draftRequest(intent: String, replyingTo: Pair<MessageHeader, MessageBody?>?, myName: String, language: String?, engine: LlmEngine, r: Redactor?): LlmRequest {
-        val context = replyingTo?.let { (h, b) -> "\n\nYou are replying to this email:\n" + render(h, b, engine, r, budget = minOf(engine.maxInputTokens - 1000, 6000)) }.orEmpty()
+    /** Background the writer attached: whole conversations, and loose notes (a copied paragraph). */
+    data class DraftContext(val messages: List<Pair<MessageHeader, MessageBody?>> = emptyList(), val notes: List<String> = emptyList()) {
+        val isEmpty: Boolean get() = messages.isEmpty() && notes.isEmpty()
+    }
+
+    private fun draftSensitivity(replyingTo: Pair<MessageHeader, MessageBody?>?, ctx: DraftContext): Sensitivity =
+        Sensitivity.of(*(listOfNotNull(replyingTo?.first) + ctx.messages.map { it.first }).map(::sensitivity).toTypedArray())
+
+    private fun draftRequest(
+        intent: String, replyingTo: Pair<MessageHeader, MessageBody?>?, myName: String, language: String?,
+        engine: LlmEngine, r: Redactor?, ctx: DraftContext = DraftContext(),
+    ): LlmRequest {
+        val budget = minOf(engine.maxInputTokens - 1000, 6000)
+        val parts = ctx.messages.size + ctx.notes.size + (if (replyingTo != null) 1 else 0)
+        val per = (budget / parts.coerceAtLeast(1)).coerceAtLeast(300)
+        val context = replyingTo?.let { (h, b) -> "\n\nYou are replying to this email:\n" + render(h, b, engine, r, budget = per) }.orEmpty()
+        val background = buildString {
+            ctx.messages.forEachIndexed { i, (h, b) -> append("\n\nBackground ${i + 1} (an earlier email the writer chose to draw on):\n").append(render(h, b, engine, r, budget = per)) }
+            ctx.notes.forEachIndexed { i, n -> append("\n\nNote ${i + 1} (text the writer copied):\n").append(trimToTokens(r?.redact(n) ?: n, per)) }
+        }
         val ask = r?.redact(intent) ?: intent
         return LlmRequest(
             task = AiTask.DRAFT,
             system = "You draft emails for $myName. Write only the message body — no subject line, no placeholders like [Name], no commentary. " +
                 "Write in $myName's voice: clear, warm, direct, and as short as the purpose allows. " +
+                (if (background.isNotEmpty()) "Use the background material for facts, names, dates and decisions; do not quote it at length or mention that you were given it. " else "") +
                 (language?.let { "Write in $it. " } ?: "Match the language of the conversation. ") +
                 "Sign off with \"$myName\".",
-            prompt = "What $myName wants to say: $ask$context",
+            prompt = "What $myName wants to say: $ask$context$background",
             maxOutputTokens = 16000, effort = Effort.MEDIUM,
         )
     }
 
-    fun draftStream(intent: String, replyingTo: Pair<MessageHeader, MessageBody?>?, myName: String, language: String? = null, onEngine: (LlmEngine) -> Unit = {}): Flow<String> =
-        intelligence.stream(AiTask.DRAFT, replyingTo?.first?.let(::sensitivity) ?: Sensitivity.NONE,
-            build = { engine, r -> draftRequest(intent, replyingTo, myName, language, engine, r) }, onEngine = onEngine)
+    fun draftStream(
+        intent: String, replyingTo: Pair<MessageHeader, MessageBody?>?, myName: String, language: String? = null,
+        context: DraftContext = DraftContext(), onEngine: (LlmEngine) -> Unit = {},
+    ): Flow<String> =
+        intelligence.stream(AiTask.DRAFT, draftSensitivity(replyingTo, context),
+            build = { engine, r -> draftRequest(intent, replyingTo, myName, language, engine, r, context) }, onEngine = onEngine)
 
-    suspend fun draft(intent: String, replyingTo: Pair<MessageHeader, MessageBody?>?, myName: String, language: String? = null): AiResult<String>? =
-        intelligence.run(AiTask.DRAFT, replyingTo?.first?.let(::sensitivity) ?: Sensitivity.NONE,
-            build = { engine, r -> draftRequest(intent, replyingTo, myName, language, engine, r) },
+    suspend fun draft(
+        intent: String, replyingTo: Pair<MessageHeader, MessageBody?>?, myName: String, language: String? = null,
+        context: DraftContext = DraftContext(),
+    ): AiResult<String>? =
+        intelligence.run(AiTask.DRAFT, draftSensitivity(replyingTo, context),
+            build = { engine, r -> draftRequest(intent, replyingTo, myName, language, engine, r, context) },
             parse = { text, r -> (r?.restore(text) ?: text).trim().takeIf { it.isNotEmpty() } })
 
     suspend fun rewrite(text: String, style: RewriteStyle): AiResult<String>? = intelligence.run(

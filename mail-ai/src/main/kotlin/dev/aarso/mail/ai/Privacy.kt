@@ -92,9 +92,13 @@ data class AiSettings(
 )
 
 /** Facts about a piece of mail that decide whether it may leave the device. */
-data class Sensitivity(val category: Category? = null, val accountId: Long? = null) {
+data class Sensitivity(val category: Category? = null, val accountId: Long? = null, val others: List<Sensitivity> = emptyList()) {
+    /** This and everything it was combined with: one request may draw on several messages. */
+    fun all(): List<Sensitivity> = listOf(copy(others = emptyList())) + others.flatMap { it.all() }
+
     companion object {
         val NONE = Sensitivity()
+        fun of(vararg parts: Sensitivity): Sensitivity = parts.firstOrNull()?.copy(others = parts.drop(1).toList()) ?: NONE
     }
 }
 

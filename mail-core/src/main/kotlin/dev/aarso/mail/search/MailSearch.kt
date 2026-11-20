@@ -1,7 +1,10 @@
 package dev.aarso.mail.search
 
 import dev.aarso.mail.model.Account
+import dev.aarso.mail.model.Category
+import dev.aarso.mail.model.Flags
 import dev.aarso.mail.model.Mailbox
+import dev.aarso.mail.model.MailboxRole
 import dev.aarso.mail.model.MessageHeader
 import dev.aarso.mail.store.MailStore
 import dev.aarso.mail.sync.Clock
@@ -64,12 +67,18 @@ class MailSearch(
     private val clock: Clock = Clock.SYSTEM,
 ) {
     @Volatile private var accounts: List<Account> = emptyList()
-    val fields = MailFields(zone) { accounts }
+    @Volatile private var labelFolders = true
+    val fields = MailFields(zone, { accounts }, { labelFolders })
     private val matcher = Matcher(fields.registry, CoverageRecencyScorer(mapOf(FieldName("subject") to 2.0, FieldName("sender") to 1.5)))
 
     private fun ctx() = EvalContext(clock.now())
 
-    suspend fun refreshAccounts() { accounts = store.accounts() }
+    suspend fun refreshAccounts() {
+        accounts = store.accounts()
+        // Folders-as-labels: Gmail's All Mail, Google accounts not yet synced, and JMAP (extra mailboxes are labels).
+        labelFolders = store.mailboxes().any { it.role == MailboxRole.ALL } ||
+            accounts.any { it.protocol == dev.aarso.mail.model.IncomingProtocol.JMAP || it.providerId.contains("gmail", true) || it.providerId.contains("google", true) }
+    }
 
     /** Parse as typed, with natural-language rewriting unless [natural] is false. Never throws. */
     fun parse(text: String, natural: Boolean = true): ParsedQuery {
@@ -209,14 +218,22 @@ class MailSearch(
         }
     }
 
-    suspend fun search(parsed: ParsedQuery, scope: SearchScope = SearchScope(), sort: SortOrder = SortOrder.NEWEST, limit: Int = 100, offset: Int = 0): SearchResult {
+    /**
+     * @param countTotal whether to also count every match when the page came back full. The count scans
+     *   the matches (tens to hundreds of ms on a big mailbox); a list that only needs its first rows
+     *   passes false and asks [count] separately, so the rows never wait for the number.
+     */
+    suspend fun search(
+        parsed: ParsedQuery, scope: SearchScope = SearchScope(), sort: SortOrder = SortOrder.NEWEST, limit: Int = 100, offset: Int = 0,
+        countTotal: Boolean = true,
+    ): SearchResult {
         refreshAccounts()
         val c = ctx()
         val plan = plan(parsed, scope, c)
         if (plan.residual == null) {
-            val order = if (sort == SortOrder.RELEVANCE && plan.fts != null) relevanceOrder(plan.fts) else sort.sql
-            val rows = store.queryHeaders(plan.where, plan.args, order, limit, offset)
-            val total = if (offset == 0 && rows.size < limit) rows.size else store.countWhere(plan.where, plan.args)
+            val ranked = sort == SortOrder.RELEVANCE && plan.fts != null
+            val rows = store.queryHeaders(plan.where, plan.args, if (ranked) "f.r, m.received_at DESC" else sort.sql, limit, offset, rankedBy = if (ranked) plan.fts else null)
+            val total = if (offset == 0 && rows.size < limit) rows.size else if (countTotal) store.countWhere(plan.where, plan.args) else null
             return SearchResult(rows, total, parsed, plan.notes)
         }
         // Residual present: page through SQL-narrowed candidates, verifying each page exactly.
@@ -239,8 +256,20 @@ class MailSearch(
         return SearchResult(out, if (exhausted) skipped + out.size else null, parsed, plan.notes)
     }
 
-    private fun relevanceOrder(fts: String): String =
-        "(SELECT rank FROM message_fts WHERE message_fts MATCH '${fts.replace("'", "''")}' AND rowid = m.id), m.received_at DESC"
+    /** The SQL a query pushes down and SQLite's plan for it — for finding out why something is slow. */
+    suspend fun explain(text: String, scope: SearchScope = SearchScope(), sort: SortOrder = SortOrder.NEWEST): List<String> {
+        val (where, args) = pushedDown(text, scope)
+        val sql = "SELECT m.id FROM message m CROSS JOIN mailbox mb ON mb.id = m.mailbox_id WHERE $where ORDER BY ${sort.sql} LIMIT 150"
+        val lines = store.db.read { query("EXPLAIN QUERY PLAN $sql", *args.toTypedArray()) { it.text(3) } }
+        return listOf("WHERE $where", "ARGS $args") + lines
+    }
+
+    /** The WHERE clause and arguments a query pushes down to SQL (before any residual verification). */
+    suspend fun pushedDown(text: String, scope: SearchScope = SearchScope()): Pair<String, List<Any?>> {
+        refreshAccounts()
+        val plan = plan(parse(text, natural = false), scope, ctx())
+        return plan.where to plan.args
+    }
 
     suspend fun search(text: String, scope: SearchScope = SearchScope(), sort: SortOrder = SortOrder.NEWEST, limit: Int = 100): SearchResult =
         search(parse(text), scope, sort, limit)
@@ -283,7 +312,7 @@ class MailSearch(
         if (plan.residual == null) {
             return store.db.read {
                 query(
-                    "SELECT $column, COUNT(*), SUM(CASE WHEN (m.flags & 1) = 0 THEN 1 ELSE 0 END) FROM message m JOIN mailbox mb ON mb.id = m.mailbox_id WHERE ${plan.where} GROUP BY $column",
+                    "SELECT $column, COUNT(*), SUM(CASE WHEN (m.flags & 1) = 0 THEN 1 ELSE 0 END) FROM message m CROSS JOIN mailbox mb ON mb.id = m.mailbox_id WHERE ${plan.where} GROUP BY $column",
                     *plan.args.toTypedArray(),
                 ) { r -> r.text(0) to (r.int(1) to r.int(2)) }.toMap()
             }
@@ -297,7 +326,83 @@ class MailSearch(
         return headers.groupBy(key).mapValues { (_, v) -> v.size to v.count { !it.isSeen } }
     }
 
+    /**
+     * The matching passage for each of [ids], with the matched words wrapped in [HIT_START]/[HIT_END]
+     * — what a result shows under its subject so you can tell *why* it matched. Empty for queries with
+     * no words to match (pure filters).
+     */
+    suspend fun snippets(parsed: ParsedQuery, ids: Collection<Long>): Map<Long, String> {
+        if (ids.isEmpty()) return emptyMap()
+        refreshAccounts()
+        val fts = plan(parsed, SearchScope(), ctx()).fts ?: return emptyMap()
+        return store.db.read {
+            query(
+                "SELECT rowid, snippet(message_fts, -1, char(2), char(3), '…', 16) FROM message_fts WHERE message_fts MATCH ? AND rowid IN (${ids.joinToString(",")})",
+                fts,
+            ) { it.long(0) to it.text(1) }
+        }.toMap()
+    }
+
+    /** What the newest matches break down into — the "refine" chips under a result list. */
+    data class Facets(
+        val sampled: Int,
+        val senders: List<Triple<String, String?, Int>>,
+        val categories: List<Pair<Category, Int>>,
+        val accounts: List<Pair<Long, Int>>,
+        val years: List<Pair<Int, Int>>,
+        val withAttachments: Int,
+        val unread: Int,
+    )
+
+    /**
+     * Break the newest [sample] matches down by sender, category, account and year. One date-ordered
+     * scan that stops at [sample] rows (so it costs the same on a million messages as on ten thousand)
+     * and is aggregated here; the counts are "of the newest [sample]" when there are more.
+     */
+    suspend fun facets(parsed: ParsedQuery, scope: SearchScope = SearchScope(), top: Int = 6, sample: Int = 20_000): Facets {
+        refreshAccounts()
+        val plan = plan(parsed, scope, ctx())
+        val rows: List<Array<Any?>> = if (plan.residual == null) {
+            store.db.read {
+                query(
+                    "SELECT m.from_addr, m.from_name, m.category, m.account_id, m.received_at, m.attachment_count, m.flags FROM message m CROSS JOIN mailbox mb ON mb.id = m.mailbox_id WHERE ${plan.where} ORDER BY m.received_at DESC, m.id DESC LIMIT ?",
+                    *(plan.args + sample).toTypedArray(),
+                ) { r -> arrayOf(r.textOrNull(0), r.textOrNull(1), r.text(2), r.long(3), r.long(4), r.int(5), r.int(6)) }
+            }
+        } else {
+            store.headers(ids(parsed, scope, sample)).map { h -> arrayOf(h.from?.address, h.from?.name, h.category.key, h.accountId, h.receivedAt, h.attachmentCount, h.flags) }
+        }
+        val bySender = HashMap<String, Pair<String?, Int>>()
+        val byCategory = HashMap<Category, Int>()
+        val byAccount = HashMap<Long, Int>()
+        val byYear = HashMap<Int, Int>()
+        var attach = 0
+        var unread = 0
+        for (r in rows) {
+            (r[0] as String?)?.let { a -> val key = a.lowercase(); val cur = bySender[key]; bySender[key] = ((cur?.first ?: r[1] as String?) to ((cur?.second ?: 0) + 1)) }
+            Category.fromKey(r[2] as String)?.let { byCategory.merge(it, 1, Int::plus) }
+            byAccount.merge(r[3] as Long, 1, Int::plus)
+            byYear.merge(java.time.Instant.ofEpochMilli(r[4] as Long).atZone(zone).year, 1, Int::plus)
+            if ((r[5] as Int) > 0) attach++
+            if ((r[6] as Int) and Flags.SEEN == 0) unread++
+        }
+        return Facets(
+            rows.size,
+            bySender.entries.sortedByDescending { it.value.second }.take(top).map { Triple(it.key, it.value.first, it.value.second) },
+            byCategory.entries.sortedByDescending { it.value }.take(top).map { it.key to it.value },
+            byAccount.entries.sortedByDescending { it.value }.map { it.key to it.value },
+            byYear.entries.sortedByDescending { it.key }.take(top).map { it.key to it.value },
+            attach, unread,
+        )
+    }
+
     /** Which of [ids] satisfy [parsed] — selection rules over an explicit set. */
     suspend fun matchesAmong(parsed: ParsedQuery, ids: Set<Long>): Set<Long> =
         if (ids.isEmpty()) emptySet() else ids(parsed, SearchScope(messageIds = ids)).toSet()
+
+    companion object {
+        /** Wrap matched words in [snippets] (control characters that cannot occur in mail text). */
+        const val HIT_START = '\u0002'
+        const val HIT_END = '\u0003'
+    }
 }
