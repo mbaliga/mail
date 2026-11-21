@@ -200,3 +200,6 @@ added; feedback is opt-in and is always a message you see in full and send yours
 ## Typeface
 
 Hyle Grotesk Classic, under the SIL Open Font License (`FONT-LICENSE-HyleGroteskClassic.txt`).
+
+### Provider logos
+The strip on the add-account page uses vector marks for Gmail, iCloud, Outlook, Microsoft 365, AOL, Proton, Zoho, GMX, mail.com, Mail.ru, QQ, Orange, Naver, Tuta, HEY and AT&T, taken from the CC0 [Simple Icons](https://simpleicons.org) set. Brand names and logos belong to their owners. Providers without artwork yet (Yahoo, Fastmail, Yandex and others) show a coloured initial; drop a `provider_<id>.xml` vector into `res/drawable` to replace one.

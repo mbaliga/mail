@@ -1,6 +1,9 @@
 package dev.aarso.mail.app.ui.components
 
 import androidx.compose.foundation.Image
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -263,26 +266,57 @@ fun ProviderBadge(p: ProviderPreset, selected: Boolean, onClick: () -> Unit, siz
     val res = remember(p.id) { ctx.resources.getIdentifier("provider_${p.id.replace('-', '_')}", "drawable", ctx.packageName) }
     Box(
         Modifier.size(size).clip(CircleShape)
-            .background(if (selected) Palette.Navy else Color(0xFFD9D9D9))
+            .background(if (res != 0 || p.id in LETTER_COLOURS) Color.White else Color(0xFFD9D9D9))
+            .border(if (selected) 3.dp else 1.dp, if (selected) Palette.Navy else Color(0xFFD9D9D9), CircleShape)
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = p.name },
         contentAlignment = Alignment.Center,
     ) {
-        if (res != 0) Image(painterResource(res), null, Modifier.size(size * 0.62f), contentScale = ContentScale.Fit)
-        else Text(p.name.first().uppercase(), style = Type.heading.copy(color = if (selected) Color.White else Palette.Navy))
+        if (res != 0) Image(painterResource(res), null, Modifier.size(size * 0.5f), contentScale = ContentScale.Fit)
+        else Text(p.name.first().uppercase(), style = Type.heading.copy(color = LETTER_COLOURS[p.id] ?: Palette.Navy, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold))
     }
 }
 
-/** A scrolling strip of providers whose ends run off the screen, as in the design. */
+/** Providers whose artwork isn't bundled yet: their initial, in their colour, until a `provider_<id>` drawable is added. */
+private val LETTER_COLOURS = mapOf("yahoo" to Color(0xFF6001D2), "fastmail" to Color(0xFF0067B9), "yandex" to Color(0xFFFC3F1D))
+
+/**
+ * The providers, drifting sideways on their own in an endless loop. A finger takes over (drag or
+ * fling, either way) and the drift resumes a moment after it lets go. With animations turned off
+ * in the system settings it stays still and is only moved by hand.
+ */
 @Composable
 fun ProviderStrip(providers: List<ProviderPreset>, selectedId: String?, onPick: (ProviderPreset) -> Unit, modifier: Modifier = Modifier) {
-    val state = rememberLazyListState(initialFirstVisibleItemIndex = 0, initialFirstVisibleItemScrollOffset = 0)
+    if (providers.isEmpty()) return
+    val n = providers.size
+    val ctx = LocalContext.current
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = (Int.MAX_VALUE / 2 / n) * n)
+    val drift = remember { android.provider.Settings.Global.getFloat(ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f }
+    if (drift) {
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        LaunchedEffect(n) {
+            val perNanoPx = with(density) { 22.dp.toPx() } / 1_000_000_000f // 22 dp a second
+            var last = 0L
+            var resumeAt = 0L
+            while (true) {
+                val now = androidx.compose.runtime.withFrameNanos { it }
+                val dt = if (last == 0L) 0L else now - last
+                last = now
+                if (state.isScrollInProgress) { resumeAt = now + 1_500_000_000L; continue }
+                if (now < resumeAt) continue
+                state.scrollBy(perNanoPx * dt)
+            }
+        }
+    }
     LazyRow(
         modifier.fillMaxWidth(), state = state,
         contentPadding = PaddingValues(horizontal = formGutter()),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        items(providers, key = { it.id }) { p -> ProviderBadge(p, selected = p.id == selectedId, onClick = { onPick(p) }) }
+        items(Int.MAX_VALUE, key = { it }) { i ->
+            val p = providers[i % n]
+            ProviderBadge(p, selected = p.id == selectedId, onClick = { onPick(p) })
+        }
     }
 }
 

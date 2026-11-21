@@ -1,5 +1,13 @@
 package dev.aarso.mail.app
 
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.test.onNodeWithContentDescription
+import org.junit.Assert.assertTrue
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.platform.testTag
 import dev.aarso.mail.app.ui.compose.AttachMailContent
 import android.app.Application
 import android.app.PendingIntent
@@ -108,6 +116,8 @@ class ScreensTest {
     fun seed() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         File(app.getDatabasePath("mail.db").path).delete()
+        // The provider strip drifts on its own; frozen here so captures stay still (the drift has its own test).
+        android.provider.Settings.Global.putFloat(app.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 0f)
         androidx.work.testing.WorkManagerTestInitHelper.initializeTestWorkManager(app)
         graph = AppGraph(app)
         runBlocking {
@@ -192,6 +202,26 @@ class ScreensTest {
         rule.onAllNodesWithText("Marcus sent", substring = true)[0].performClick()
         rule.waitForIdle()
         rule.onRoot().captureRoboImage("build/screens/mailbox-selecting.png")
+    }
+
+    @Test fun providerStripDriftsAndIsDraggable() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        android.provider.Settings.Global.putFloat(app.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+        val providers = dev.aarso.mail.discovery.Providers.featured
+        rule.mainClock.autoAdvance = false
+        rule.setContent {
+            MailTheme { androidx.compose.foundation.layout.Box(Modifier.testTag("strip")) { dev.aarso.mail.app.ui.components.ProviderStrip(providers, null, {}) } }
+        }
+        fun x() = rule.onNodeWithContentDescription("Gmail").fetchSemanticsNode().positionInRoot.x
+        rule.mainClock.advanceTimeBy(200)
+        val a = x()
+        rule.mainClock.advanceTimeBy(3_000)
+        val b = x()
+        assertTrue("the strip drifts by itself ($a -> $b)", b < a - 20f)
+        rule.onNodeWithTag("strip").performTouchInput { swipeLeft() }
+        rule.mainClock.advanceTimeBy(400)
+        val c = x()
+        assertTrue("a swipe moves it ($b -> $c)", kotlin.math.abs(c - b) > 100f)
     }
 
     @Test fun firstRun() = show("first-run", waitFor = "set up yet") { dev.aarso.mail.app.ui.components.FirstRun {} }
