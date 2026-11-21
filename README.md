@@ -203,3 +203,6 @@ Hyle Grotesk Classic, under the SIL Open Font License (`FONT-LICENSE-HyleGrotesk
 
 ### Provider logos
 The strip on the add-account page uses vector marks for Gmail, iCloud, Outlook, Microsoft 365, AOL, Proton, Zoho, GMX, mail.com, Mail.ru, QQ, Orange, Naver, Tuta, HEY and AT&T, taken from the CC0 [Simple Icons](https://simpleicons.org) set. Brand names and logos belong to their owners. Providers without artwork yet (Yahoo, Fastmail, Yandex and others) show a coloured initial; drop a `provider_<id>.xml` vector into `res/drawable` to replace one.
+
+### Icons
+The interface icons are the supplied "You've got mail" set (Streamline, 48-unit grid, 3-unit strokes), compiled into `HyIcons` as vector paths: mail, mailbox, calendar, clock, image, settings, search, pen, share, send, plus, arrows, recycling (trash), reply (and forward, mirrored), info, alert, exclamation, exit and tools. Glyphs the set doesn't cover (star, archive, paperclip and so on) remain in the earlier Hyle-style drawing, with their stroke thinned to 1.5 so the weights match.

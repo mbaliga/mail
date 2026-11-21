@@ -166,7 +166,7 @@ fun SuggestionRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (thumbnail != null) { thumbnail(); Spacer(Modifier.width(12.dp)) }
-        Text(text, style = Type.small.copy(color = Palette.SheetInk), modifier = Modifier.weight(1f), maxLines = 2)
+        Text(text, style = Type.small.copy(color = Palette.SheetInk), modifier = Modifier.weight(1f), maxLines = 4)
         TextAction(acceptLabel, Palette.Navy, onAccept)
         if (secondLabel != null) TextAction(secondLabel, Palette.Navy, onSecond)
         TextAction("✕", Palette.SheetInkDim, onDismiss)
