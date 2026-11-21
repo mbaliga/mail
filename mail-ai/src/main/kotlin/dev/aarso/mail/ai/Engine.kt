@@ -21,6 +21,7 @@ enum class AiTask(val label: String, val cloudAllowedByDefault: Boolean) {
     RULE_FROM_TEXT("writing rules from a sentence", true),
     ASK_INBOX("answering questions about mail", true),
     BRIEFING("the spoken briefing", false),
+    AGENT("the home assistant reading and tidying mail", false),
 }
 
 /**

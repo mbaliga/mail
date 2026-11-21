@@ -149,6 +149,7 @@ class AppGraph(val context: Context) {
     val intelligence = Intelligence(::engines, { settings.value.ai }, ledger)
     val ai = MailAi(intelligence)
     val tldrs = TldrUpgrader(store, ai) { settings.value.ai }
+    val assistant: dev.aarso.mail.app.ai.Assistant by lazy { dev.aarso.mail.app.ai.Assistant(this) }
     /** The id of the line being read aloud (a message id, or "intro"), for the list to light up. */
     val speaking = MutableStateFlow<String?>(null)
     val speech: Speech by lazy { Speech(context, speaking) }

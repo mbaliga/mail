@@ -7,6 +7,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import dev.aarso.mail.app.ui.components.countPhrase
+import dev.aarso.mail.app.ui.components.IconAction
+import dev.aarso.mail.app.ui.components.HeaderBar
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -66,7 +71,7 @@ import java.time.LocalTime
  * the headline is always a true sentence about what the sheet below shows.
  */
 @Composable
-fun HomeScreen(modifier: Modifier = Modifier) {
+fun HomeScreen(modifier: Modifier = Modifier, onPlaces: () -> Unit = {}) {
     val app = LocalApp.current
     val g = app.graph
     val m = LocalMetrics.current
@@ -96,71 +101,97 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     val speaking by g.speaking.collectAsState()
     val items by list.items.collectAsState()
 
+    var assistantOpen by remember { mutableStateOf(false) }
+    val assistant by g.assistant.state.collectAsState()
+    val suggestions = (assistant as? dev.aarso.mail.app.ai.Assistant.State.Done)?.run?.proposals?.size ?: 0
+    val working = assistant is dev.aarso.mail.app.ai.Assistant.State.Running
+
     Box(modifier.fillMaxSize().background(Palette.Field)) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            // ---- the sentence ----
-            // The toggle shares only the first line's corner; every phrase gets the full width.
-            Box(Modifier.fillMaxWidth().padding(start = m.gutter, end = m.gutter - 8.dp, top = 18.dp)) {
-                Column(Modifier.fillMaxWidth().padding(end = 8.dp).widthIn(max = 720.dp)) {
-                    val style = Type.headline(m)
-                    Text("You've got", style = style.copy(color = Palette.Ink))
-                    val busy = syncing.values.any { it.running }
-                    Text(
-                        countLine(digest.total, "new mail"),
-                        style = style.copy(color = Palette.Ink),
-                        modifier = Modifier.alpha(if (busy) breathing() else 1f),
-                    )
-                    var accountMenu by remember { mutableStateOf(false) }
-                    Box {
-                        PhraseButton(DigestBuilder.accountPhrase(selectedAccounts, accounts), Palette.Accounts, style, { accountMenu = true })
-                        DropdownMenu(accountMenu, { accountMenu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Every inbox") },
-                                onClick = { g.updateSettings { it.copy(digestAccounts = emptySet()) }; accountMenu = false },
-                                trailingIcon = { if (settings.digestAccounts.isEmpty()) HyIcon(HyIcons.check, null, Palette.RoomInk, size = 18.dp) },
-                            )
-                            for (a in accounts) {
-                                val on = a.id in settings.digestAccounts
-                                DropdownMenuItem(
-                                    text = { Column { Text(DigestBuilder.accountName(a, accounts)); Text(a.email, style = Type.small.copy(color = Palette.RoomInkDim)) } },
-                                    onClick = {
-                                        g.updateSettings { s ->
-                                            val next = if (on) s.digestAccounts - a.id else s.digestAccounts + a.id
-                                            s.copy(digestAccounts = if (next.size == accounts.size) emptySet() else next)
-                                        }
-                                    },
-                                    trailingIcon = { if (on) HyIcon(HyIcons.check, null, Palette.RoomInk, size = 18.dp) },
-                                )
-                            }
-                            DropdownMenuItem(text = { Text("Add an account…") }, onClick = { accountMenu = false; app.open(Screen.AccountSetup()) })
-                        }
+            // ---- the bar: out to Places on the left, Settings and the assistant on the right ----
+            HeaderBar(
+                title = "", onBack = onPlaces,
+                actions = {
+                    IconAction(HyIcons.sparkle, if (suggestions > 0) "Assistant, $suggestions suggestions" else "Assistant", if (suggestions > 0 || working) Palette.Accounts else Palette.RoomInk, { assistantOpen = true })
+                    IconAction(HyIcons.settings, "Settings", Palette.RoomInk, { app.open(Screen.Settings) })
+                },
+            )
+            MailSheet(Modifier.fillMaxSize()) {
+                // ---- the sentence ----
+                // The toggle shares only the first line's corner; every phrase gets the full width.
+                Box(Modifier.fillMaxWidth().padding(start = m.gutter, end = m.gutter - 8.dp, top = 8.dp)) {
+                    Row(Modifier.align(Alignment.TopEnd), verticalAlignment = Alignment.CenterVertically) {
+                        Text("tl;dr", style = Type.small.copy(color = Palette.SheetInk))
+                        Spacer(Modifier.width(6.dp))
+                        TldrToggle(settings.tldr, { g.updateSettings { it.copy(tldr = !it.tldr) } }, light = true)
                     }
-                    var windowMenu by remember { mutableStateOf(false) }
-                    Box {
-                        PhraseButton(settings.digestWindow.phrase, Palette.Window, style, { windowMenu = true })
-                        DropdownMenu(windowMenu, { windowMenu = false }) {
-                            for (w in DigestWindow.entries) {
+                    Column(Modifier.fillMaxWidth().padding(end = 8.dp, top = 40.dp).widthIn(max = 720.dp)) {
+                        val style = Type.headline(m)
+                        Text("You've got", style = style.copy(color = Palette.SheetInk))
+                        val busy = syncing.values.any { it.running }
+                        Text(
+                            countLine(digest.total, "new mail"),
+                            style = style.copy(color = Palette.SheetInk),
+                            modifier = Modifier.alpha(if (busy) breathing() else 1f),
+                        )
+                        var accountMenu by remember { mutableStateOf(false) }
+                        Box {
+                            PhraseButton(DigestBuilder.accountPhrase(selectedAccounts, accounts), Palette.Accounts, style, { accountMenu = true })
+                            DropdownMenu(accountMenu, { accountMenu = false }) {
                                 DropdownMenuItem(
-                                    text = { Text(w.phrase) },
-                                    onClick = { g.updateSettings { it.copy(digestWindow = w) }; windowMenu = false },
-                                    trailingIcon = { if (w == settings.digestWindow) HyIcon(HyIcons.check, null, Palette.RoomInk, size = 18.dp) },
+                                    text = { Text("Every inbox") },
+                                    onClick = { g.updateSettings { it.copy(digestAccounts = emptySet()) }; accountMenu = false },
+                                    trailingIcon = { if (settings.digestAccounts.isEmpty()) HyIcon(HyIcons.check, null, Palette.RoomInk, size = 18.dp) },
                                 )
+                                for (acct in accounts) {
+                                    val on = acct.id in settings.digestAccounts
+                                    DropdownMenuItem(
+                                        text = { Column { Text(DigestBuilder.accountName(acct, accounts)); Text(acct.email, style = Type.small.copy(color = Palette.RoomInkDim)) } },
+                                        onClick = {
+                                            g.updateSettings { s ->
+                                                val next = if (on) s.digestAccounts - acct.id else s.digestAccounts + acct.id
+                                                s.copy(digestAccounts = if (next.size == accounts.size) emptySet() else next)
+                                            }
+                                        },
+                                        trailingIcon = { if (on) HyIcon(HyIcons.check, null, Palette.RoomInk, size = 18.dp) },
+                                    )
+                                }
+                                DropdownMenuItem(text = { Text("Add an account…") }, onClick = { accountMenu = false; app.open(Screen.AccountSetup()) })
+                            }
+                        }
+                        var windowMenu by remember { mutableStateOf(false) }
+                        Box {
+                            PhraseButton(settings.digestWindow.phrase, Palette.Window, style, { windowMenu = true })
+                            DropdownMenu(windowMenu, { windowMenu = false }) {
+                                for (w in DigestWindow.entries) {
+                                    DropdownMenuItem(
+                                        text = { Text(w.phrase) },
+                                        onClick = { g.updateSettings { it.copy(digestWindow = w) }; windowMenu = false },
+                                        trailingIcon = { if (w == settings.digestWindow) HyIcon(HyIcons.check, null, Palette.RoomInk, size = 18.dp) },
+                                    )
+                                }
                             }
                         }
                     }
                 }
-                TldrToggle(settings.tldr, { g.updateSettings { it.copy(tldr = !it.tldr) } }, Modifier.align(Alignment.TopEnd).padding(top = 4.dp))
-            }
 
-            Spacer(Modifier.height(18.dp))
-            TabStrip(
-                tabs = digest.tabs.map { TabItem(it.id, it.label, it.unread) },
-                selected = tab?.id,
-                onSelect = { tabId = it },
-            )
-            Spacer(Modifier.height(16.dp))
+                // ---- what the assistant found, when it has looked ----
+                if (suggestions > 0) {
+                    Text(
+                        "Your assistant has ${countPhrase(suggestions, "suggestion")}", style = Type.body.copy(color = Palette.Window),
+                        modifier = Modifier.padding(horizontal = m.gutter, vertical = 6.dp).clickable { assistantOpen = true },
+                    )
+                }
 
-            MailSheet(Modifier.fillMaxSize()) {
+                Spacer(Modifier.height(14.dp))
+                TabStrip(
+                    tabs = digest.tabs.map { TabItem(it.id, it.label, it.unread) },
+                    selected = tab?.id,
+                    onSelect = { tabId = it },
+                    active = androidx.compose.ui.graphics.Color(0xFF4A4A4A),
+                    idle = androidx.compose.ui.graphics.Color(0xFFE3E3E3),
+                )
+                Spacer(Modifier.height(10.dp))
                 MessageList(
                     controller = list,
                     tldr = settings.tldr,
@@ -202,6 +233,11 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = m.gutter, bottom = 24.dp),
         )
     }
+
+    if (assistantOpen) AssistantSheet(settings.digestWindow.phrase) { assistantOpen = false }
+
+    // Now and then, on this phone only, the assistant looks through what's new by itself.
+    LaunchedEffect(digest.total > 0) { if (digest.total > 0) { kotlinx.coroutines.delay(4_000); g.assistant.triageIfDue(settings.digestWindow.phrase) } }
 
     // Model-written summaries for what is on screen, a screenful at a time.
     val visible = items.take(24).map { it.id }

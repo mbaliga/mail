@@ -161,6 +161,9 @@ class AppState(val graph: AppGraph, val scope: CoroutineScope) {
         }
     }
 
+    /** Offer undo for a batch that was applied outside [act]. */
+    fun offerUndo(t: UndoToken) { _undo.value = t }
+
     fun undoLast() {
         val t = _undo.value ?: return
         _undo.value = null

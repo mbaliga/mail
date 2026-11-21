@@ -37,6 +37,8 @@ data class AppSettings(
     val suggestScreenshots: Boolean = false,
     /** While writing, offer what was just copied (the clipboard is only peeked at, never read, until accepted). */
     val suggestClipboard: Boolean = true,
+    /** The home assistant looks through new mail by itself, on this phone only, now and then. */
+    val assistantAuto: Boolean = true,
     /** The one-time "turn on screenshot suggestions?" prompt was answered. */
     val screenshotPromptDismissed: Boolean = false,
     // ---- Notifications ----

@@ -212,3 +212,8 @@ Conversations, drafts and the outbox open in their own tabs along the foot of th
 
 ### Splash
 There is one splash: the system window is plain navy (no icon), and the supplied artwork (`brand_splash.xml`, a vector, so sharp at any resolution) fades in over it for the first moments of a cold start.
+
+### The home assistant (agentic, local first)
+Home follows the supplied view: a black bar (back to Places, the assistant, Settings) over a white sheet with the headline sentence, tl;dr toggle, tabs and list. The sparkle in the bar opens the assistant: tell it what to do ("clear old newsletters", "what needs a reply?") or tap *Tidy up*. It looks through your mail with read-only tools (search, count, read), then lists **suggestions** — archive, mark read, star, snooze, label, draft a reply, make a rule — each ticked or unticked for you to review. Nothing happens until you press Apply; applied batches can be undone, drafts open in a tab and are never sent, rules open for review, and anything that trashes mail starts unticked.
+
+Models run in order: an on-device model first; if it can't produce valid steps, your own key — only if you allowed *the home assistant* in Settings → Intelligence, never shown mail in a protected category or account, and with identifiers redacted. Every engine starts a fresh run, so nothing a local model read is replayed to a cloud one. Now and then (at most every six hours, and only on this phone) it quietly looks through what's new and leaves its suggestions on Home as a link; switch that off with `assistantAuto`.

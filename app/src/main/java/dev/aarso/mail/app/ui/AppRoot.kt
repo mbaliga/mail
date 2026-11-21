@@ -124,7 +124,7 @@ fun AppRoot(app: AppState) {
                 right = { FindRoom(::go) },
                 top = { RulesRoom(::go) },
                 bottom = { WriteRoom(::go) },
-                home = { HomeScreen() },
+                home = { HomeScreen(onPlaces = { shell.open(RoomEdge.LEFT) }) },
             )
             ShakeToRefresh { app.scope.launch { g.sync.syncAll(inboxOnly = true) }; app.say("Checking for mail") }
         }

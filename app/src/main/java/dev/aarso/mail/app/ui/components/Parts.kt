@@ -192,13 +192,21 @@ fun ListenFab(playing: Boolean, onClick: () -> Unit, modifier: Modifier = Modifi
 
 /** The tl;dr switch from the reference: grey bar over light bar; inverted when showing raw subjects. */
 @Composable
-fun TldrToggle(on: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+fun TldrToggle(on: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier, light: Boolean = false) {
     Canvas(
         modifier.size(40.dp).clickable(role = Role.Switch, onClick = onToggle)
             .semantics { contentDescription = if (on) "Showing summaries; show subjects" else "Showing subjects; show summaries" },
     ) {
         val w = size.width
         val bar = size.height * 0.16f
+        if (light) {
+            // On the white sheet: a pale rounded key with two bars, the lower one shorter when summaries are on.
+            drawRoundRect(Color(0xFFEDEDED), Offset(w * 0.06f, size.height * 0.1f), Size(w * 0.88f, size.height * 0.8f), androidx.compose.ui.geometry.CornerRadius(6f, 6f))
+            drawRoundRect(Color(0xFFD3D3D3), Offset(w * 0.06f, size.height * 0.1f), Size(w * 0.88f, size.height * 0.8f), androidx.compose.ui.geometry.CornerRadius(6f, 6f), style = androidx.compose.ui.graphics.drawscope.Stroke(2f))
+            drawRect(if (on) Color(0xFFFFFFFF) else Color(0xFFBDBDBD), Offset(w * 0.2f, size.height * 0.32f), Size(w * 0.6f, bar))
+            drawRect(if (on) Color(0xFFBDBDBD) else Color(0xFFFFFFFF), Offset(w * 0.2f, size.height * 0.56f), Size(w * (if (on) 0.38f else 0.6f), bar))
+            return@Canvas
+        }
         val top = if (on) Palette.ToggleTop else Palette.ToggleBottom
         val bottom = if (on) Palette.ToggleBottom else Palette.ToggleTop
         drawRect(top, Offset(w * 0.14f, size.height * 0.30f), Size(w * 0.72f, bar))

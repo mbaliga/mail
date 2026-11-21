@@ -1,5 +1,6 @@
 package dev.aarso.mail.app
 
+import dev.aarso.mail.app.ui.home.AssistantContent
 import org.junit.Assert.assertEquals
 import kotlinx.coroutines.flow.first
 import androidx.compose.ui.layout.positionInRoot
@@ -336,6 +337,50 @@ class ScreensTest {
 
     private fun s0() {
         state.open(Screen.Reader(firstId)); state.open(Screen.Outbox)
+    }
+
+    private fun sampleRun(vararg ids: Long) = dev.aarso.mail.ai.AgentRun(
+        listOf(
+            dev.aarso.mail.ai.ProposedAction(dev.aarso.mail.ai.ActionKind.ARCHIVE, "Archive ${ids.size} newsletters", "You haven't opened the last six.", ids.toList()),
+            dev.aarso.mail.ai.ProposedAction(dev.aarso.mail.ai.ActionKind.DRAFT_REPLY, "Reply to Priya Raman", "She asks if Thursday at 3 works.", listOf(ids.first()), "Thursday at 3 works for me — I'll bring the signed lease."),
+            dev.aarso.mail.ai.ProposedAction(dev.aarso.mail.ai.ActionKind.SNOOZE, "Snooze the deck from Marcus", "Comments are due Friday noon.", listOf(ids.last()), "2026-11-25T09:00"),
+            dev.aarso.mail.ai.ProposedAction(dev.aarso.mail.ai.ActionKind.TRASH, "Move 2 expired offers to trash", "Both ended last month.", ids.toList().take(2)),
+        ),
+        "Two things to tidy, one reply to send and one to put off.", "Gemini Nano on this phone", true, 5,
+    )
+
+    @Test fun assistantSheet() {
+        val ids = runBlocking { graph.store.headers(listOf(firstId, firstId + 1, firstId + 2)) }.map { it.id }
+        graph.assistant.setState(dev.aarso.mail.app.ai.Assistant.State.Done("Tidy up", sampleRun(*ids.toLongArray())))
+        show("assistant-sheet", waitFor = "Worked out") {
+            Column(Modifier.fillMaxSize().background(Color.White).padding(horizontal = 24.dp, vertical = 32.dp)) {
+                AssistantContent("since yesterday") {}
+            }
+        }
+    }
+
+    @Test fun assistantApplyArchivesAndCanBeUndone() {
+        val ids = runBlocking { graph.store.headers(listOf(firstId, firstId + 1)) }.map { it.id }
+        val before = runBlocking { graph.store.header(ids[0])!!.mailboxId }
+        val n = runBlocking {
+            graph.assistant.apply(listOf(dev.aarso.mail.ai.ProposedAction(dev.aarso.mail.ai.ActionKind.ARCHIVE, "Archive", ids = ids)), state)
+        }
+        assertEquals(2, n)
+        assertTrue("moved out of the inbox", runBlocking { graph.store.header(ids[0])!!.mailboxId } != before)
+        assertTrue("undo is on offer", state.undo.value != null)
+        state.undoLast()
+        runBlocking { kotlinx.coroutines.delay(500) }
+        assertEquals("and undo puts it back", before, runBlocking { graph.store.header(ids[0])!!.mailboxId })
+    }
+
+    @Test fun assistantRunning() {
+        graph.assistant.setState(dev.aarso.mail.app.ai.Assistant.State.Running("Tidy up", "Gemini Nano on this phone", true,
+            listOf("Looked through “category:newsletters older_than:7d” — 14 found", "Read “Sprint review Thursday?”", "Suggests: Archive 14 newsletters"), false))
+        show("assistant-running", waitFor = "Working with") {
+            Column(Modifier.fillMaxSize().background(Color.White).padding(horizontal = 24.dp, vertical = 32.dp)) {
+                AssistantContent("since yesterday") {}
+            }
+        }
     }
 
     @Test fun reader() = show("reader", waitFor = "refund") { ReaderScreen(firstId, emptyList()) {} }

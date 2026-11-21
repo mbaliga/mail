@@ -35,6 +35,14 @@ class Intelligence(
 
     fun invalidate() = probes.clear()
 
+    /** The person's current rules, for callers that must apply them to what they show a model. */
+    fun policy(): AiSettings = settings()
+
+    /** Count what an off-device call used against the daily budget. */
+    fun recordUsage(engine: LlmEngine, response: LlmResponse) { if (!engine.onDevice) ledger.record(response.inputTokens + response.outputTokens) }
+
+    fun overBudget(): Boolean = settings().dailyCloudTokens != 0L && ledger.used() >= settings().dailyCloudTokens
+
     /** Engines that may run [task] on mail of [sensitivity], in the order they should be tried. */
     suspend fun plan(task: AiTask, sensitivity: Sensitivity = Sensitivity.NONE): List<LlmEngine> {
         val s = settings()
