@@ -6,6 +6,9 @@ import android.net.Uri
 import androidx.activity.result.ActivityResult
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.input.key.KeyEvent
 import dev.aarso.mail.app.AppGraph
@@ -56,12 +59,75 @@ interface ActivityBridge {
 val LocalBridge = staticCompositionLocalOf<ActivityBridge> { error("No ActivityBridge") }
 val LocalApp = staticCompositionLocalOf<AppState> { error("No AppState") }
 
+/**
+ * One open thing: Home ("Inbox"), a message or conversation, a draft, the outbox. Each tab keeps its
+ * own back stack, so a list opened from Home and a draft written beside it never trample each other.
+ */
+@Stable
+class Tab(val id: Long, title: String, val closable: Boolean = true) {
+    var title by mutableStateOf(title)
+    val stack = mutableStateListOf<Screen>()
+    /** What the tab is about, for finding it again instead of opening a second copy. */
+    val root: Screen? get() = stack.firstOrNull()
+}
+
 @Stable
 class AppState(val graph: AppGraph, val scope: CoroutineScope) {
-    val stack = mutableStateListOf<Screen>()
+    val home = Tab(0, "Inbox", closable = false)
+    val tabs = mutableStateListOf(home)
+    var active by mutableStateOf(home)
+        private set
+    private val recent = ArrayDeque<Tab>()
+    private var nextTab = 1L
+
+    /** The visible tab's pages. Everything that used to push onto "the stack" still does. */
+    val stack: androidx.compose.runtime.snapshots.SnapshotStateList<Screen> get() = active.stack
+
+    fun activate(tab: Tab) {
+        if (tab === active) return
+        recent.remove(active); recent.addLast(active)
+        active = tab
+        recent.remove(tab)
+    }
+
+    fun closeTab(tab: Tab) {
+        if (!tab.closable) return
+        val wasActive = tab === active
+        val at = tabs.indexOf(tab)
+        tabs.remove(tab)
+        recent.remove(tab)
+        if (wasActive) active = recent.removeLastOrNull()?.takeIf { it in tabs } ?: tabs.getOrElse((at - 1).coerceAtLeast(0)) { home }
+    }
+
+    private fun tabFor(screen: Screen, title: String, matches: (Screen) -> Boolean): Tab {
+        tabs.firstOrNull { t -> t.root?.let(matches) == true }?.let { activate(it); return it }
+        val t = Tab(nextTab++, title)
+        t.stack.add(screen)
+        tabs.add(t)
+        activate(t)
+        return t
+    }
 
     fun open(screen: Screen) {
-        if (stack.lastOrNull() != screen) stack.add(screen)
+        when (screen) {
+            // Things you read, write or wait on get a tab of their own and stay open while you go elsewhere.
+            is Screen.Reader -> {
+                val before = tabs.size
+                val t = tabFor(screen, "…") { it is Screen.Reader && it.messageId == screen.messageId }
+                if (tabs.size > before) scope.launch { graph.store.header(screen.messageId)?.let { t.title = it.subject.ifBlank { "(no subject)" } } }
+            }
+            is Screen.Compose -> {
+                val d = screen.draft
+                tabFor(screen, d.subject.ifBlank { "New mail" }) { it is Screen.Compose && d.id != 0L && it.draft.id == d.id }
+            }
+            Screen.Outbox -> tabFor(screen, "Outbox") { it == Screen.Outbox }
+            is Screen.External -> tabFor(screen, screen.name) { it == screen }
+            // Navigation (lists, settings, setup) belongs to Home.
+            else -> {
+                activate(home)
+                if (home.stack.lastOrNull() != screen) home.stack.add(screen)
+            }
+        }
     }
 
     fun replace(screen: Screen) {
@@ -69,13 +135,16 @@ class AppState(val graph: AppGraph, val scope: CoroutineScope) {
         stack.add(screen)
     }
 
+    /** Back: out of the page; out of the tab when it was the last page; false when already Home with nothing open. */
     fun back(): Boolean {
         if (stack.isEmpty()) return false
         stack.removeAt(stack.lastIndex)
+        if (stack.isEmpty() && active.closable) closeTab(active)
         return true
     }
 
-    fun home() = stack.clear()
+    /** Back to bare Home: closes pages on Home, leaves other tabs open. */
+    fun home() { activate(home); home.stack.clear() }
 
     fun compose(draft: Draft) = open(Screen.Compose(draft))
 

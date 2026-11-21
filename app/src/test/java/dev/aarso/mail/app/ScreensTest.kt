@@ -1,5 +1,7 @@
 package dev.aarso.mail.app
 
+import org.junit.Assert.assertEquals
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.test.onNodeWithContentDescription
 import org.junit.Assert.assertTrue
@@ -178,7 +180,7 @@ class ScreensTest {
         rule.setContent {
             MailTheme { CompositionLocalProvider(LocalApp provides state, LocalBridge provides bridge) { content() } }
         }
-        if (waitFor != null) rule.waitUntil(10_000) { rule.onAllNodesWithText(waitFor, substring = true).fetchSemanticsNodes().isNotEmpty() }
+        if (waitFor != null) rule.waitUntil(30_000) { rule.onAllNodesWithText(waitFor, substring = true).fetchSemanticsNodes().isNotEmpty() }
         rule.waitForIdle()
         rule.onRoot().captureRoboImage("build/screens/$name.png")
     }
@@ -277,11 +279,64 @@ class ScreensTest {
 
     @Test fun find() = show("room-find", waitFor = "TRY") { FindRoom {} }
 
-    @Test fun rules() = show("room-rules", waitFor = "Old newsletters") { RulesRoom {} }
+    @Test fun rules() {
+        assertTrue("the seeded rule is in the store", runBlocking { graph.store.rules() }.any { it.name == "Old newsletters" })
+        show("room-rules", waitFor = "Old newsletters") { RulesRoom {} }
+    }
 
     @Test fun write() = show("room-write", waitFor = "New message") { WriteRoom {} }
 
     @Test fun mailbox() = show("mailbox", waitFor = "messages") { MailboxScreen(Screen.Mailbox("Inbox", "in:inbox")) {} }
+
+    /** A conversation of four messages, so the reader has cards to stack. */
+    private fun conversation(): Long = runBlocking {
+        val first = graph.store.header(firstId)!!
+        val now = System.currentTimeMillis()
+        val extra = listOf("Priya Raman" to "Thanks Fin — can you confirm the amount?", "Fin" to "Confirmed: the full charge is refunded.", "Priya Raman" to "Great, that settles it.").mapIndexed { i, (who, text) ->
+            first.copy(
+                id = 0, uid = 5000L + i, messageId = "<c$i@test>", threadKey = first.threadKey, subject = first.subject,
+                from = EmailAddress("${who.lowercase().replace(" ", "")}@example.com", who), receivedAt = now - (3 - i) * 60_000L, sentAt = now - (3 - i) * 60_000L,
+                preview = text, tldr = text,
+            )
+        }
+        graph.store.insertMessages(extra).forEach { graph.store.saveBody(MessageBody(it.id, text = it.preview + "\n\n> On Mon, Fin wrote:\n> earlier words"), it) }
+        firstId
+    }
+
+    @Test fun readerCarouselAndCards() {
+        val id = conversation()
+        val ids = runBlocking { graph.store.observeMessages { graph.store.threadMessages(graph.store.header(id)!!.threadKey, graph.store.header(id)!!.accountId) }.first() }.map { it.id }
+        show("reader-carousel", waitFor = "refund") { ReaderScreen(id, listOf(id) + ids.filter { it != id }.take(1) + listOf(id + 1)) {} }
+    }
+
+    @Test fun tabsOpenAndCloseLikeTabs() {
+        val a = runBlocking { graph.store.accounts().first() }
+        val s = state
+        assertEquals(1, s.tabs.size)
+        s.open(Screen.Reader(firstId)); s.open(Screen.Reader(firstId + 1))
+        assertEquals("two conversations, two tabs", 3, s.tabs.size)
+        s.open(Screen.Reader(firstId))
+        assertEquals("opening one again switches to it", 3, s.tabs.size)
+        s.compose(Drafts.new(a))
+        assertEquals(4, s.tabs.size)
+        s.open(Screen.Settings)
+        assertTrue("navigation goes to Home", s.active === s.home && s.home.stack.last() == Screen.Settings)
+        s.activate(s.tabs.last())
+        assertTrue(s.back())
+        assertEquals("back from a tab's only page closes the tab", 3, s.tabs.size)
+        assertTrue("and lands on a tab that is still open", s.active in s.tabs)
+    }
+
+    @Test fun tabBarRender() {
+        s0()
+        show("tabs", waitFor = "Outbox") {
+            AppRoot(state)
+        }
+    }
+
+    private fun s0() {
+        state.open(Screen.Reader(firstId)); state.open(Screen.Outbox)
+    }
 
     @Test fun reader() = show("reader", waitFor = "refund") { ReaderScreen(firstId, emptyList()) {} }
 

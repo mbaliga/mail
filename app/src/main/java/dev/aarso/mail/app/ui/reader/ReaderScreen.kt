@@ -6,6 +6,14 @@ import android.content.Intent
 import android.provider.CalendarContract
 import android.util.Base64
 import androidx.compose.foundation.background
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -94,26 +102,73 @@ import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
 
-/** A message on its own page. */
+/**
+ * A conversation on its own page — and a carousel of them: when you came from a list, the threads
+ * either side of this one are a swipe away, their edges peeking in at the sides. Above the sheet the
+ * edges of the thread's earlier messages are stacked, as many as there are (up to four).
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ReaderScreen(messageId: Long, siblings: List<Long>, onBack: () -> Unit) {
-    var current by remember { mutableStateOf(messageId) }
     val app = LocalApp.current
+    val scope = rememberCoroutineScope()
+    val ids = remember(messageId, siblings) { if (messageId in siblings) siblings else listOf(messageId) }
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = ids.indexOf(messageId).coerceAtLeast(0)) { ids.size }
+    val current = ids[pager.currentPage.coerceIn(ids.indices)]
     val header by remember(current) { app.graph.store.observeMessages { app.graph.store.header(current) } }.collectAsState(initial = null)
     val h = header
-    val idx = siblings.indexOf(current)
+    val depth by remember(h?.threadKey) {
+        app.graph.store.observeMessages { h?.let { app.graph.store.threadMessages(it.threadKey, it.accountId).size } ?: 0 }
+    }.collectAsState(initial = 0)
+
+    fun go(delta: Int) { val to = pager.currentPage + delta; if (to in ids.indices) scope.launch { pager.animateScrollToPage(to) } }
+
     Page(
         title = h?.subject?.ifBlank { "(no subject)" } ?: "",
         onBack = onBack,
         actions = {
-            IconAction(HyIcons.prev, "Newer", Palette.Ink, { siblings.getOrNull(idx - 1)?.let { current = it } }, enabled = idx > 0)
-            IconAction(HyIcons.next, "Older", Palette.Ink, { siblings.getOrNull(idx + 1)?.let { current = it } }, enabled = idx in 0 until siblings.lastIndex)
+            IconAction(HyIcons.prev, "Newer", Palette.RoomInk, { go(-1) }, enabled = pager.currentPage > 0)
+            IconAction(HyIcons.next, "Older", Palette.RoomInk, { go(1) }, enabled = pager.currentPage < ids.lastIndex)
         },
+        header = { StackPeek((depth - 1).coerceIn(0, 4)) },
     ) {
-        if (h != null) ReaderContent(h, onDone = {
-            val next = siblings.getOrNull(idx + 1) ?: siblings.getOrNull(idx - 1)
-            if (next != null && next != current) current = next else onBack()
-        }, onNavigate = { d -> siblings.getOrNull(idx + d)?.let { current = it } })
+        androidx.compose.foundation.pager.HorizontalPager(
+            state = pager, modifier = Modifier.fillMaxSize().background(Palette.SheetRaised),
+            contentPadding = PaddingValues(horizontal = if (ids.size > 1) 16.dp else 0.dp),
+            pageSpacing = 8.dp,
+        ) { page ->
+            val id = ids[page]
+            val ph by remember(id) { app.graph.store.observeMessages { app.graph.store.header(id) } }.collectAsState(initial = null)
+            val offset = ((pager.currentPage - page) + pager.currentPageOffsetFraction).let { kotlin.math.abs(it) }.coerceIn(0f, 1f)
+            Box(
+                Modifier.fillMaxSize().padding(vertical = if (ids.size > 1) 8.dp else 0.dp)
+                    .graphicsLayer { val k = 1f - 0.06f * offset; scaleX = k; scaleY = k; alpha = 1f - 0.4f * offset }
+                    .background(Palette.Sheet),
+            ) {
+                ph?.let { m ->
+                    ReaderContent(m, active = page == pager.currentPage, onDone = {
+                        if (page < ids.lastIndex) go(1) else if (page > 0) go(-1) else onBack()
+                    }, onNavigate = { d -> go(d) })
+                }
+            }
+        }
+    }
+}
+
+/** The edges of earlier messages in a thread, stacked above the sheet, narrower the further back. */
+@Composable
+private fun StackPeek(layers: Int) {
+    if (layers <= 0) return
+    Box(Modifier.fillMaxWidth().height((layers * 8 + 4).dp).offset(y = 10.dp)) {
+        for (i in 0 until layers) {
+            val depth = layers - i // the topmost layer is the furthest back
+            Box(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 0.dp).offset(y = (-(layers - depth) * 8).dp)
+                    .fillMaxWidth(1f - 0.07f * depth).height(((depth) * 8 + 24).dp)
+                    .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
+                    .background(Color.White.copy(alpha = 1f - 0.12f * depth)),
+            )
+        }
     }
 }
 
@@ -122,7 +177,7 @@ fun ReaderScreen(messageId: Long, siblings: List<Long>, onBack: () -> Unit) {
  * [onDone] runs after an action that takes the message out of the list (archive, delete, move).
  */
 @Composable
-fun ReaderContent(h: MessageHeader, onDone: () -> Unit, onNavigate: (Int) -> Unit = {}, modifier: Modifier = Modifier) {
+fun ReaderContent(h: MessageHeader, onDone: () -> Unit, onNavigate: (Int) -> Unit = {}, modifier: Modifier = Modifier, active: Boolean = true) {
     val app = LocalApp.current
     val g = app.graph
     val bridge = LocalBridge.current
@@ -137,7 +192,7 @@ fun ReaderContent(h: MessageHeader, onDone: () -> Unit, onNavigate: (Int) -> Uni
     val thread by remember(h.threadKey) { g.store.observeMessages { g.store.threadMessages(h.threadKey, h.accountId) } }.collectAsState(initial = emptyList())
     val account by produceState(g.accountsNow().firstOrNull { it.id == h.accountId }, h.accountId) { value = g.store.account(h.accountId) }
 
-    LaunchedEffect(h.id) { if (!h.isSeen) g.actions.markRead(listOf(h.id)) }
+    LaunchedEffect(h.id, active) { if (active && !h.isSeen) g.actions.markRead(listOf(h.id)) }
 
     var allowImages by remember(h.id) { mutableStateOf(settings.loadRemoteImages) }
     var showDetails by remember(h.id) { mutableStateOf(false) }
@@ -171,7 +226,8 @@ fun ReaderContent(h: MessageHeader, onDone: () -> Unit, onNavigate: (Int) -> Uni
 
     // Keyboard.
     val currentH by rememberUpdatedState(h)
-    DisposableEffect(h.id) {
+    DisposableEffect(h.id, active) {
+        if (!active) return@DisposableEffect onDispose {}
         val handler: (androidx.compose.ui.input.key.KeyEvent) -> Boolean = handler@{ e ->
             if (e.type != KeyEventType.KeyDown) return@handler false
             val ids = listOf(currentH.id)
@@ -347,12 +403,11 @@ fun ReaderContent(h: MessageHeader, onDone: () -> Unit, onNavigate: (Int) -> Uni
                 for (p in parts) AttachmentRow(h, p)
             }
 
-            // ---- the rest of the conversation ----
+            // ---- the rest of the conversation, as a stack of cards ----
             val others = thread.filter { it.id != h.id }.sortedByDescending { it.receivedAt }
             if (others.isNotEmpty()) {
                 Spacer(Modifier.height(22.dp))
-                Text("In this conversation", style = Type.caps.copy(color = Palette.SheetInkDim))
-                for (o in others) ThreadItem(o)
+                for (o in others) ThreadCard(o, bleed = m.gutter)
             }
             Spacer(Modifier.height(96.dp))
         }
@@ -494,28 +549,66 @@ private fun AttachmentRow(h: MessageHeader, p: PartInfo) {
     Hairline()
 }
 
-/** An earlier (or later) message in the thread: collapsed to a line, expands in place. */
+/**
+ * One message of the conversation as a card: sender, three small actions (details, share, reply), the new
+ * words, and a link to the quoted text. Cards overlap a little, each curving over the one before.
+ */
 @Composable
-private fun ThreadItem(o: MessageHeader) {
+private fun ThreadCard(o: MessageHeader, bleed: androidx.compose.ui.unit.Dp) {
     val app = LocalApp.current
+    val g = app.graph
+    val bridge = LocalBridge.current
+    val scope = rememberCoroutineScope()
     var open by remember { mutableStateOf(false) }
+    var details by remember { mutableStateOf(false) }
+    var quoted by remember { mutableStateOf(false) }
     val body by produceState<MessageBody?>(null, open) {
-        if (open) value = app.graph.store.body(o.id) ?: runCatching { app.graph.sync.fetchBody(o.id) }.getOrNull()
+        value = g.store.body(o.id) ?: if (open) runCatching { g.sync.fetchBody(o.id) }.getOrNull() else null
     }
-    Column(Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 12.dp)) {
+    val full = body?.text ?: body?.html?.let { HtmlText.toText(it) } ?: o.preview
+    val fresh = remember(full) { HtmlText.newContent(full) }
+    val hasQuoted = fresh.length + 8 < full.trim().length
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    val overlap = with(androidx.compose.ui.platform.LocalDensity.current) { 22.dp.roundToPx() }
+    val bleedPx = with(androidx.compose.ui.platform.LocalDensity.current) { bleed.roundToPx() }
+    Column(
+        Modifier
+            .layout { measurable, c ->
+                val p = measurable.measure(c.copy(minWidth = c.maxWidth + 2 * bleedPx, maxWidth = c.maxWidth + 2 * bleedPx))
+                layout(c.maxWidth, p.height - overlap) { p.place(-bleedPx, 0) }
+            }
+            .shadow(5.dp, shape).background(Color.White, shape)
+            .clickable { open = !open }
+            .padding(start = bleed + 4.dp, end = bleed + 4.dp, top = 18.dp, bottom = 22.dp + 22.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(o.from?.displayName() ?: "", style = Type.body.copy(fontWeight = FontWeight.Medium), modifier = Modifier.weight(1f), maxLines = 1)
-            Text(shortWhen(o.receivedAt), style = Type.small.copy(color = Palette.SheetInkDim))
+            Text(o.from?.displayName() ?: "", style = Type.body.copy(color = Palette.SheetInkDim), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            IconAction(HyIcons.info, "Details", Palette.Navy, { details = !details })
+            IconAction(HyIcons.share, "Share", Palette.Navy, {
+                bridge.launch(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_SUBJECT, o.subject).putExtra(Intent.EXTRA_TEXT, fresh.ifBlank { full }), null))
+            })
+            IconAction(HyIcons.reply, "Reply", Palette.Navy, {
+                scope.launch { g.store.account(o.accountId)?.let { a -> app.compose(Drafts.reply(a, o, body, false)) } }
+            })
         }
-        if (!open) Text(o.tldr ?: o.preview, style = Type.small.copy(color = Palette.SheetInkDim), maxLines = 2, overflow = TextOverflow.Ellipsis)
-        else {
-            Spacer(Modifier.height(8.dp))
-            val text = body?.text ?: body?.html?.let { HtmlText.toText(it) } ?: o.preview
-            PlainBody(HtmlText.newContent(text))
-            TextAction("Open", Palette.Navy, { app.open(Screen.Reader(o.id)) })
+        if (details) {
+            Column(Modifier.padding(top = 6.dp)) {
+                Detail("From", o.from?.let { "${it.name ?: ""} <${it.address}>" }.orEmpty())
+                if (o.to.isNotEmpty()) Detail("To", o.to.joinToString(", ") { it.address })
+                Detail("Date", fullWhen(o.sentAt.takeIf { it > 0 } ?: o.receivedAt))
+            }
         }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            (if (quoted) full else fresh).ifBlank { o.tldr ?: o.preview }, style = Type.body,
+            maxLines = if (open || quoted) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis,
+        )
+        if (hasQuoted) Text(
+            if (quoted) "Hide quoted text" else "See quoted text", style = Type.small.copy(color = Color(0xFF4B3FD9)),
+            modifier = Modifier.padding(top = 12.dp).clickable { quoted = !quoted; open = true },
+        )
+        if (open) TextAction("Open in its own tab", Palette.Navy, { app.open(Screen.Reader(o.id)) })
     }
-    Hairline()
 }
 
 @Composable

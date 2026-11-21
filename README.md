@@ -206,3 +206,9 @@ The strip on the add-account page uses vector marks for Gmail, iCloud, Outlook, 
 
 ### Icons
 The interface icons are the supplied "You've got mail" set (Streamline, 48-unit grid, 3-unit strokes), compiled into `HyIcons` as vector paths: mail, mailbox, calendar, clock, image, settings, search, pen, share, send, plus, arrows, recycling (trash), reply (and forward, mirrored), info, alert, exclamation, exit and tools. Glyphs the set doesn't cover (star, archive, paperclip and so on) remain in the earlier Hyle-style drawing, with their stroke thinned to 1.5 so the weights match.
+
+### Tabs and the thread carousel
+Conversations, drafts and the outbox open in their own tabs along the foot of the screen (Inbox stays first). Tap to switch, tap the current tab's × or long-press any tab to close it; back from a tab's first page closes it. Opening the same message again switches to its tab. In a conversation, swipe sideways to move to the neighbouring threads of the list you came from (their edges peek in), and the thread's earlier messages are stacked above the page and below it as cards (details, share, reply, "See quoted text").
+
+### Splash
+There is one splash: the system window is plain navy (no icon), and the supplied artwork (`brand_splash.xml`, a vector, so sharp at any resolution) fades in over it for the first moments of a cold start.

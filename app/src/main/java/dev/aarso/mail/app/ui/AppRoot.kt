@@ -95,8 +95,9 @@ fun AppRoot(app: AppState) {
 
     val needsSetup = accounts.isEmpty()
 
+    Column(Modifier.fillMaxSize().background(Palette.Field)) {
     Box(
-        Modifier.fillMaxSize().background(Palette.Field)
+        Modifier.weight(1f).fillMaxWidth().background(Palette.Field)
             .focusRequester(focus).focusable()
             .onPreviewKeyEvent { e ->
                 if (app.keyHandlers.lastOrNull()?.invoke(e) == true) return@onPreviewKeyEvent true
@@ -129,16 +130,19 @@ fun AppRoot(app: AppState) {
         }
 
         // ---- pages over home ----
+        // Each tab keeps its own pages; switching back finds the scroll positions where they were left.
+        val saved = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
         val top = app.stack.lastOrNull()
+        val tabId = app.active.id
         AnimatedContent(
-            targetState = top,
+            targetState = tabId to top,
             transitionSpec = {
-                if (targetState is Screen.Compose) (slideInVertically(tween(260)) { it / 3 } + fadeIn(tween(200))) togetherWith fadeOut(tween(160))
+                if (targetState.second is Screen.Compose) (slideInVertically(tween(260)) { it / 3 } + fadeIn(tween(200))) togetherWith fadeOut(tween(160))
                 else (slideInHorizontally(tween(240)) { it / 4 } + fadeIn(tween(200))) togetherWith (slideOutHorizontally(tween(200)) { it / 6 } + fadeOut(tween(160)))
             },
             label = "pages",
-        ) { screen ->
-            if (screen != null) Box(Modifier.fillMaxSize().background(Palette.Field)) {
+        ) { (id, screen) ->
+            if (screen != null) saved.SaveableStateProvider("$id:${screen.hashCode()}") { Box(Modifier.fillMaxSize().background(Palette.Field)) {
                 when (screen) {
                     is Screen.Mailbox -> MailboxScreen(screen) { app.back() }
                     is Screen.Reader -> ReaderScreen(screen.messageId, screen.siblings) { app.back() }
@@ -150,7 +154,7 @@ fun AppRoot(app: AppState) {
                     is Screen.External -> ExternalMessage(screen) { app.back() }
                     Screen.Shortcuts -> Shortcuts { app.back() }
                 }
-            }
+            } }
         }
 
         BackHandler(enabled = app.stack.isNotEmpty() || shell.anyRoomVisible) {
@@ -158,6 +162,10 @@ fun AppRoot(app: AppState) {
         }
 
         Bars(app, Modifier.align(Alignment.BottomCenter))
+    }
+    if (!needsSetup && app.tabs.size > 1) {
+        dev.aarso.mail.app.ui.components.TabBar(app.tabs, app.active, onSelect = { app.activate(it) }, onClose = { app.closeTab(it) })
+    }
     }
 
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
