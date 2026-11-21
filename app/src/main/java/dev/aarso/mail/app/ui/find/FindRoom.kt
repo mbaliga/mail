@@ -225,6 +225,16 @@ fun FindRoom(onOpen: (Screen) -> Unit) {
                     )
                 }
             }
+            // Few or no hits: offer the spelling that does match, from the index's own vocabulary.
+            val fixes by produceState(emptyList<dev.aarso.mail.search.MailSearch.Correction>(), live, totalMatches) {
+                value = if ((totalMatches ?: Int.MAX_VALUE) < 3 && live.isNotBlank()) runCatching { g.search.didYouMean(g.search.parse(live, natural = false)) }.getOrDefault(emptyList()) else emptyList()
+            }
+            if (fixes.isNotEmpty()) {
+                Text(
+                    "Did you mean " + fixes.joinToString(" ") { it.to } + "?", style = Type.body.copy(color = Palette.Window),
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).clickable { text = g.search.applyCorrections(text, fixes) },
+                )
+            }
             facets?.let { f ->
                 val chips = buildList {
                     f.senders.filter { it.third < f.sampled }.take(3).forEach { (addr, name, n) -> add(((name ?: addr).substringBefore(' ')) + " ($n)" to "from:$addr") }

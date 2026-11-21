@@ -64,7 +64,7 @@ class AppGraph(val context: Context) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
-    val store = MailStore(BundledSQLiteDriver(), context.getDatabasePath("mail.db").apply { parentFile?.mkdirs() }.path)
+    val store = MailStore(BundledSQLiteDriver(), context.getDatabasePath("mail.db").apply { parentFile?.mkdirs() }.path, dev.aarso.mail.search.IndexText(dev.aarso.mail.app.search.IcuBoundarySource(), "icu"))
     val secrets = KeystoreSecrets(context)
     val tokens = AndroidTokenProvider(context, secrets)
     val http: OkHttpClient = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
@@ -184,7 +184,31 @@ class AppGraph(val context: Context) {
         sync.onNewMail = { account, fresh -> onNewMail(account, fresh) }
     }
 
+    // ---- the search index ----
+
+    private val _indexing = MutableStateFlow(false)
+    /** True while the search index is being (re)built in the background. */
+    val indexing: StateFlow<Boolean> = _indexing.asStateFlow()
+
+    /** Bring the index up to the current format, a few hundred messages at a time, out of everyone's way. */
+    fun startIndexing() {
+        if (!_indexing.compareAndSet(false, true)) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                store.prepareIndex()
+                var did = false
+                while (store.indexNeedsRebuild()) {
+                    did = true
+                    if (!store.reindexStep(200)) break
+                    kotlinx.coroutines.delay(40)
+                }
+                if (did) runCatching { store.optimizeIndex() }
+            } finally { _indexing.value = false }
+        }
+    }
+
     fun start() {
+        startIndexing()
         scope.launch {
             for (c in settings.value.cloudEngines) secrets.get(SecretRef(c.keyRef))?.let { apiKeys[c.keyRef] = it }
             search.refreshAccounts()

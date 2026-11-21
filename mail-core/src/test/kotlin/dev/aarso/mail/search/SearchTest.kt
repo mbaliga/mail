@@ -1,5 +1,7 @@
 package dev.aarso.mail.search
 
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertFalse
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import dev.aarso.mail.digest.DigestBuilder
 import dev.aarso.mail.digest.DigestWindow
@@ -216,5 +218,77 @@ class SearchTest {
         assertEquals(5, f.unread)
         assertTrue(f.years.any { it.first == 2026 })
         assertTrue(f.categories.any { it.first == Category.PEOPLE && it.second == 2 })
+    }
+
+    // ---- the rest of the search engineering ----
+
+    /** A stand-in for the ICU word breaker the app injects: every ideograph is its own word. */
+    private val perIdeograph = dev.aarso.search.Segmenter.BoundarySource { text, _ ->
+        val b = ArrayList<Int>(); b += 0
+        for (i in 1 until text.length) if (Character.UnicodeScript.of(text[i].code) == Character.UnicodeScript.HAN || Character.UnicodeScript.of(text[i - 1].code) == Character.UnicodeScript.HAN || text[i].isWhitespace() || text[i - 1].isWhitespace()) b += i
+        b += text.length; b.distinct()
+    }
+
+    @Test fun `mail in scripts without spaces is searchable by its words`() = runBlocking {
+        val d = createTempDir("cjk")
+        val s = MailStore(BundledSQLiteDriver(), File(d, "c.db").absolutePath, dev.aarso.mail.search.IndexText(perIdeograph, "test"))
+        val acct = s.saveAccount(Account(email = "me@example.org", displayName = "Me", providerId = "x", protocol = IncomingProtocol.IMAP, auth = AuthKind.PASSWORD, secret = SecretRef("s"), identities = listOf(Identity(EmailAddress("me@example.org"), isDefault = true))))
+        val box = s.upsertMailboxes(acct.id, listOf(Mailbox(accountId = acct.id, remoteId = "INBOX", name = "Inbox", role = MailboxRole.INBOX)), true).single()
+        val m = s.insertMessages(listOf(MessageHeader(accountId = acct.id, mailboxId = box.id, uid = 1, subject = "東京駅で会った", from = EmailAddress("a@b.jp"), receivedAt = now, preview = "会議の資料")))
+        val ms = MailSearch(s, zone, clock)
+        fun hits(q: String) = runBlocking { ms.search(ms.parse(q, natural = false)).headers.size }
+        assertEquals("a word inside the run", 1, hits("駅"))
+        assertEquals("a two-character word", 1, hits("東京"))
+        assertEquals("the preview too", 1, hits("資料"))
+        assertEquals("no false hit", 0, hits("大阪"))
+        assertEquals("a phrase", 1, hits("\"東京駅\""))
+        s.close(); d.deleteRecursively()
+        assertTrue(m.isNotEmpty())
+    }
+
+    @Test fun `an index built the old way is rebuilt in the background when the format changes`() = runBlocking {
+        val d = createTempDir("reindex")
+        val path = File(d, "r.db").absolutePath
+        val old = MailStore(BundledSQLiteDriver(), path, dev.aarso.mail.search.IndexText(perIdeograph, "v1"))
+        old.prepareIndex()
+        val acct = old.saveAccount(Account(email = "me@example.org", displayName = "Me", providerId = "x", protocol = IncomingProtocol.IMAP, auth = AuthKind.PASSWORD, secret = SecretRef("s"), identities = listOf(Identity(EmailAddress("me@example.org"), isDefault = true))))
+        val box = old.upsertMailboxes(acct.id, listOf(Mailbox(accountId = acct.id, remoteId = "INBOX", name = "Inbox", role = MailboxRole.INBOX)), true).single()
+        // Indexed with a source that never splits (the JDK default on a lone ideograph run), as an older build would have.
+        val plain = MailStore(BundledSQLiteDriver(), File(d, "unused.db").absolutePath).also { it.close() }
+        old.insertMessages(listOf(MessageHeader(accountId = acct.id, mailboxId = box.id, uid = 1, subject = "東京駅で会った", from = EmailAddress("a@b.jp"), receivedAt = now, preview = "x")))
+        old.close()
+
+        val fresh = MailStore(BundledSQLiteDriver(), path, dev.aarso.mail.search.IndexText(perIdeograph, "v2"))
+        fresh.prepareIndex()
+        assertTrue("a different format marks the index for rebuilding", fresh.indexNeedsRebuild())
+        assertTrue(fresh.indexStatus().rebuilding)
+        var steps = 0
+        while (fresh.reindexStep(batch = 1)) steps++
+        assertTrue(steps >= 1)
+        assertFalse(fresh.indexNeedsRebuild())
+        assertEquals("v2".let { "${dev.aarso.mail.search.IndexText.SCHEME}:$it" }, fresh.indexStatus().version)
+        assertEquals(1, fresh.indexStatus().indexed)
+        assertEquals(null, fresh.checkIndex())
+        fresh.optimizeIndex()
+        val ms = MailSearch(fresh, zone, clock)
+        assertEquals(1, ms.search(ms.parse("駅", natural = false)).headers.size)
+        fresh.close(); d.deleteRecursively()
+        assertNotNull(plain)
+    }
+
+    @Test fun `html-only mail is searchable`() = runBlocking {
+        val h = store.header(ids.getValue("alice"))!!
+        store.saveBody(MessageBody(h.id, html = "<html><body><p>The quarterly <b>zephyr</b> report is attached.</p></body></html>"), h)
+        assertEquals(setOf("alice"), q("zephyr"))
+    }
+
+    @Test fun `a misspelt word is corrected to one that exists`() = runBlocking {
+        val parsed = search.parse("invoce", natural = false)
+        val fixes = search.didYouMean(parsed)
+        assertEquals(listOf(MailSearch.Correction("invoce", "invoice")), fixes)
+        assertEquals("invoice acme", search.applyCorrections("Invoce acme", fixes).lowercase())
+        assertTrue("a word that exists is left alone", search.didYouMean(search.parse("invoice", natural = false)).isEmpty())
+        assertTrue("so is one nothing resembles", search.didYouMean(search.parse("qzxwvk", natural = false)).isEmpty())
+        assertEquals("a swapped pair of letters", listOf("proposal"), search.didYouMean(search.parse("porposal", natural = false)).map { it.to })
     }
 }

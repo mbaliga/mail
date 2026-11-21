@@ -68,7 +68,7 @@ class MailSearch(
 ) {
     @Volatile private var accounts: List<Account> = emptyList()
     @Volatile private var labelFolders = true
-    val fields = MailFields(zone, { accounts }, { labelFolders })
+    val fields = MailFields(zone, { accounts }, { labelFolders }, store.text)
     private val matcher = Matcher(fields.registry, CoverageRecencyScorer(mapOf(FieldName("subject") to 2.0, FieldName("sender") to 1.5)))
 
     private fun ctx() = EvalContext(clock.now())
@@ -175,12 +175,12 @@ class MailSearch(
         if (lexical.isNotEmpty()) {
             val positive = lexical.filterNot { it is QueryNode.Not }
             if (positive.isNotEmpty()) {
-                fts = QueryCompiler.compileFts(if (lexical.size == 1) lexical[0] else QueryNode.And(lexical), prefixBareTerms = true)
+                fts = QueryCompiler.compileFts(store.text.rewrite(if (lexical.size == 1) lexical[0] else QueryNode.And(lexical)), prefixBareTerms = true)
                 fts?.let { where += "m.id IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?)"; args += it }
             } else {
                 // Only exclusions ("-draft"): FTS5 has no standalone NOT, so exclude each match set.
                 for (neg in lexical) {
-                    val expr = QueryCompiler.compileFts((neg as QueryNode.Not).child, prefixBareTerms = true) ?: continue
+                    val expr = QueryCompiler.compileFts(store.text.rewrite((neg as QueryNode.Not).child), prefixBareTerms = true) ?: continue
                     where += "m.id NOT IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?)"; args += expr
                 }
             }
@@ -399,6 +399,58 @@ class MailSearch(
     /** Which of [ids] satisfy [parsed] — selection rules over an explicit set. */
     suspend fun matchesAmong(parsed: ParsedQuery, ids: Set<Long>): Set<Long> =
         if (ids.isEmpty()) emptySet() else ids(parsed, SearchScope(messageIds = ids)).toSet()
+
+
+    // ---- typo tolerance ----
+
+    /** A word the person typed that matches nothing, and the indexed word it is most likely a slip for. */
+    data class Correction(val from: String, val to: String)
+
+    /**
+     * "Did you mean": for each typed word that no message holds, the closest word that some do — within
+     * one edit (two for longer words), keeping the first letter (most slips do), the most widespread
+     * candidate winning a tie. Reads the index's own vocabulary, so it knows the person's names and jargon.
+     */
+    suspend fun didYouMean(parsed: ParsedQuery): List<Correction> {
+        val out = ArrayList<Correction>()
+        val words = QueryCompiler.lexicalText(parsed.root).split(' ').filter { it.length >= 4 && it.all(Char::isLetter) }.distinct().take(4)
+        for (w in words) {
+            val n = dev.aarso.search.Normalizer.normalize(w)
+            if (store.text.needsSegmentation(n) || n.isEmpty()) continue
+            if (store.termCount(n) > 0) continue
+            val limit = if (n.length >= 8) 2 else 1
+            val best = store.vocabulary(n.substring(0, 1)).asSequence()
+                .filter { (t, _) -> kotlin.math.abs(t.length - n.length) <= limit }
+                .mapNotNull { (t, docs) -> editDistance(n, t, limit).takeIf { it in 1..limit }?.let { Triple(t, it, docs) } }
+                .minWithOrNull(compareBy<Triple<String, Int, Int>>({ it.second }, { -it.third }))
+            if (best != null) out += Correction(w, best.first)
+        }
+        return out
+    }
+
+    /** [raw] with each corrected word swapped in (whole words, any case). */
+    fun applyCorrections(raw: String, corrections: List<Correction>): String =
+        corrections.fold(raw) { text, c -> text.replace(Regex("(?i)(?<![\\p{L}\\p{N}])" + Regex.escape(c.from) + "(?![\\p{L}\\p{N}])"), c.to) }
+
+    /** Optimal-string-alignment distance (insert, delete, substitute, swap neighbours), or limit+1 once it must exceed [limit]. */
+    private fun editDistance(a: String, b: String, limit: Int): Int {
+        var prev2 = IntArray(b.length + 1)
+        var prev = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            val cur = IntArray(b.length + 1)
+            cur[0] = i
+            var rowMin = cur[0]
+            for (j in 1..b.length) {
+                var v = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
+                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) v = minOf(v, prev2[j - 2] + 1)
+                cur[j] = v
+                if (v < rowMin) rowMin = v
+            }
+            if (rowMin > limit) return limit + 1
+            prev2 = prev; prev = cur
+        }
+        return prev[b.length]
+    }
 
     companion object {
         /** Wrap matched words in [snippets] (control characters that cannot occur in mail text). */

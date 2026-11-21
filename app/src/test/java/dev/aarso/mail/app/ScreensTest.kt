@@ -383,6 +383,19 @@ class ScreensTest {
         }
     }
 
+    @Test fun icuBreaksJapaneseIntoWords() {
+        val b = dev.aarso.mail.app.search.IcuBoundarySource().boundaries("東京駅で会った", java.util.Locale.ROOT)
+        assertTrue("a dictionary-backed breaker splits an unspaced sentence: $b", b.size > 3)
+        assertEquals(0, b.first()); assertEquals(7, b.last())
+        val idx = dev.aarso.mail.search.IndexText(dev.aarso.mail.app.search.IcuBoundarySource(), "icu")
+        val q = idx.forQuery("東京駅")!!
+        assertTrue("the query is broken the same way as the index: '$q'", q.contains(" ") || q == "東京駅")
+    }
+
+    @Test fun settingsSearchSection() = show("settings-search", waitFor = "Up to date") {
+        androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().background(Color.White).padding(24.dp)) { dev.aarso.mail.app.ui.settings.SearchSettings() }
+    }
+
     @Test fun reader() = show("reader", waitFor = "refund") { ReaderScreen(firstId, emptyList()) {} }
 
     @Test fun compose() {

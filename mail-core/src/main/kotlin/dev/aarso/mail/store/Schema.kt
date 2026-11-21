@@ -14,7 +14,7 @@ package dev.aarso.mail.store
  *    indexed query, and each carries its provenance.
  */
 object Schema {
-    const val VERSION = 2
+    const val VERSION = 3
 
     private val V1 = """
         CREATE TABLE IF NOT EXISTS account (
@@ -225,6 +225,11 @@ object Schema {
         CREATE INDEX IF NOT EXISTS message_cover ON message(received_at DESC, mailbox_id, flags, hidden, snoozed_until, attachment_count, category);
     """
 
+    /** V3: every distinct indexed word with how many messages hold it — what "did you mean" corrects against. */
+    private val V3 = """
+        CREATE VIRTUAL TABLE IF NOT EXISTS message_vocab USING fts5vocab(message_fts, 'row');
+    """
+
     fun migrate(c: Conn) {
         val current = c.scalarLong("PRAGMA user_version")?.toInt() ?: 0
         if (current < 1) {
@@ -232,6 +237,9 @@ object Schema {
         }
         if (current < 2) {
             c.execScript(V2)
+        }
+        if (current < 3) {
+            c.execScript(V3)
         }
         if (current != VERSION) c.execScript("PRAGMA user_version = $VERSION")
     }

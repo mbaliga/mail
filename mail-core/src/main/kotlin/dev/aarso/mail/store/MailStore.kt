@@ -42,7 +42,7 @@ data class Reminder(val id: Long, val messageId: Long, val kind: String, val due
  * Writes name their tables so [observe]-based flows refresh exactly the screens that could change.
  * Bulk paths (sync inserting 500 headers, a rule archiving 10,000 messages) run as one transaction.
  */
-class MailStore(driver: SQLiteDriver, path: String) : AutoCloseable {
+class MailStore(driver: SQLiteDriver, path: String, val text: dev.aarso.mail.search.IndexText = dev.aarso.mail.search.IndexText()) : AutoCloseable {
 
     val db = Db(driver, path)
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -347,12 +347,13 @@ class MailStore(driver: SQLiteDriver, path: String) : AutoCloseable {
 
     private fun Conn.indexFts(id: Long, h: MessageHeader, body: String, isNew: Boolean = true) {
         if (!isNew) exec("DELETE FROM message_fts WHERE rowid = ?", id)
+        val t = text
         exec(
             "INSERT INTO message_fts(rowid, subject, sender, recipients, body, attachments, labels) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            id, h.subject, listOfNotNull(h.from?.name, h.from?.address, h.sender?.address).joinToString(" "),
-            (h.to + h.cc + h.bcc).joinToString(" ") { listOfNotNull(it.name, it.address).joinToString(" ") },
-            body, h.parts.filter { it.isAttachment }.mapNotNull { it.fileName }.joinToString(" "),
-            h.labels.filterNot { it.startsWith("\\") }.joinToString(" "),
+            id, t.forIndex(h.subject), t.forIndex(listOfNotNull(h.from?.name, h.from?.address, h.sender?.address).joinToString(" ")),
+            t.forIndex((h.to + h.cc + h.bcc).joinToString(" ") { listOfNotNull(it.name, it.address).joinToString(" ") }),
+            t.forIndex(body), t.forIndex(h.parts.filter { it.isAttachment }.mapNotNull { it.fileName }.joinToString(" ")),
+            t.forIndex(h.labels.filterNot { it.startsWith("\\") }.joinToString(" ")),
         )
     }
 
@@ -482,7 +483,7 @@ class MailStore(driver: SQLiteDriver, path: String) : AutoCloseable {
             json.encodeToString(strList, body.structuredData), body.fetchedAt,
         )
         val attachments = body.attachments
-        val newText = body.text?.let { HtmlText.newContent(it) }.orEmpty()
+        val newText = indexableText(body)
         val preview = if (header.preview.isBlank() && newText.isNotBlank()) HtmlText.preview(newText) else header.preview
         exec(
             "UPDATE message SET body_state = ?, attachment_count = ?, preview = ?, parts = COALESCE(parts, ?) WHERE id = ?",
@@ -490,6 +491,94 @@ class MailStore(driver: SQLiteDriver, path: String) : AutoCloseable {
             if (attachments.isEmpty()) null else json.encodeToString(partList, attachments), body.messageId,
         )
         indexFts(body.messageId, header.copy(parts = header.parts.ifEmpty { attachments }), newText.take(64_000), isNew = false)
+    }
+
+
+    /** What of a body goes into the index: what the author wrote (no quoted history), from HTML when there is no plain part. */
+    private fun indexableText(body: MessageBody): String {
+        val plain = body.text ?: body.html?.let { HtmlText.toText(it) } ?: return ""
+        return HtmlText.newContent(plain)
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // The search index: versioning, background rebuild, health
+    // ------------------------------------------------------------------------------------------
+
+    data class IndexStatus(val messages: Int, val indexed: Int, val version: String, val current: String, val rebuilding: Boolean, val doneUpTo: Long)
+
+    /**
+     * Compare the index's recorded format with the current one ([IndexText.version]). A new store just
+     * records it; an older index is marked for a background rebuild ([reindexStep]) rather than rebuilt
+     * on the spot — search keeps working on the old index meanwhile.
+     */
+    suspend fun prepareIndex() {
+        val current = text.version
+        if (setting(INDEX_VERSION_KEY) == current) return
+        val any = db.read { scalarLong("SELECT 1 FROM message LIMIT 1") != null }
+        if (!any) { putSetting(INDEX_VERSION_KEY, current); putSetting(INDEX_CURSOR_KEY, null); return }
+        if (setting(INDEX_CURSOR_KEY) == null) putSetting(INDEX_CURSOR_KEY, "0")
+    }
+
+    suspend fun indexNeedsRebuild(): Boolean = setting(INDEX_CURSOR_KEY) != null
+
+    /** Force a full rebuild (a Settings button, or after a suspected problem). */
+    suspend fun rebuildIndex() { putSetting(INDEX_CURSOR_KEY, "0") }
+
+    /**
+     * Re-index the next [batch] messages. Returns true while more remain. Each message gets its
+     * index row deleted and rewritten, so rows that were missing are restored too.
+     */
+    suspend fun reindexStep(batch: Int = 300): Boolean {
+        val cursor = setting(INDEX_CURSOR_KEY)?.toLongOrNull() ?: return false
+        val ids = db.read { query("SELECT id FROM message WHERE id > ? ORDER BY id LIMIT ?", cursor, batch) { it.long(0) } }
+        if (ids.isEmpty()) {
+            db.write(setOf("setting")) {
+                exec("INSERT OR REPLACE INTO setting(key, value) VALUES (?, ?)", INDEX_VERSION_KEY, text.version)
+                exec("DELETE FROM setting WHERE key = ?", INDEX_CURSOR_KEY)
+            }
+            return false
+        }
+        val headers = headers(ids)
+        val bodies = ids.associateWith { id -> runCatching { body(id) }.getOrNull() }
+        db.write(setOf("message_fts", "setting")) {
+            for (h in headers) {
+                val b = bodies[h.id]
+                val t = if (b != null) indexableText(b).take(64_000) else h.preview
+                indexFts(h.id, h.copy(parts = h.parts.ifEmpty { b?.attachments.orEmpty() }), t.ifBlank { h.preview }, isNew = false)
+            }
+            exec("INSERT OR REPLACE INTO setting(key, value) VALUES (?, ?)", INDEX_CURSOR_KEY, ids.last().toString())
+        }
+        return true
+    }
+
+    suspend fun indexStatus(): IndexStatus = db.read {
+        IndexStatus(
+            messages = scalarLong("SELECT count(*) FROM message")?.toInt() ?: 0,
+            indexed = scalarLong("SELECT count(*) FROM message_fts")?.toInt() ?: 0,
+            version = scalarText("SELECT value FROM setting WHERE key = ?", INDEX_VERSION_KEY).orEmpty(),
+            current = text.version,
+            rebuilding = scalarText("SELECT value FROM setting WHERE key = ?", INDEX_CURSOR_KEY) != null,
+            doneUpTo = scalarText("SELECT value FROM setting WHERE key = ?", INDEX_CURSOR_KEY)?.toLongOrNull() ?: 0,
+        )
+    }
+
+    /** Null when the index is sound; otherwise what SQLite reported. Reads the whole index — a maintenance action. */
+    suspend fun checkIndex(): String? = runCatching {
+        db.write(emptySet()) { exec("INSERT INTO message_fts(message_fts, rank) VALUES('integrity-check', 1)") }
+        null
+    }.getOrElse { it.message ?: "The search index failed its check" }
+
+    /** Merge the index's segments: smaller on disk, a little faster to read. Best after a big import or rebuild. */
+    suspend fun optimizeIndex() = db.write(setOf("message_fts")) { exec("INSERT INTO message_fts(message_fts) VALUES('optimize')") }
+
+    /** How many messages hold [term] (a prefix match), for typo correction. */
+    suspend fun termCount(term: String): Int = db.read {
+        scalarLong("SELECT coalesce(sum(doc), 0) FROM message_vocab WHERE term >= ? AND term < ?", term, term + "\uffff")?.toInt() ?: 0
+    }
+
+    /** Indexed words starting with [firstChar], most widespread first — the candidates a typo is corrected against. */
+    suspend fun vocabulary(firstChar: String, limit: Int = 20_000): List<Pair<String, Int>> = db.read {
+        query("SELECT term, doc FROM message_vocab WHERE term >= ? AND term < ? ORDER BY doc DESC LIMIT ?", firstChar, firstChar + "\uffff", limit) { it.text(0) to it.long(1).toInt() }
     }
 
     suspend fun body(messageId: Long): MessageBody? = db.read {
@@ -658,6 +747,11 @@ class MailStore(driver: SQLiteDriver, path: String) : AutoCloseable {
         queryOne("SELECT address, name, sent_count, received_count, last_contact_at FROM contact WHERE address = ?", address.lowercase()) {
             Contact(it.text(0), it.textOrNull(1), it.int(2), it.int(3), it.long(4))
         }
+    }
+
+    private companion object {
+        const val INDEX_VERSION_KEY = "search.index.version"
+        const val INDEX_CURSOR_KEY = "search.index.cursor"
     }
 
     suspend fun setting(key: String): String? = db.read { scalarText("SELECT value FROM setting WHERE key = ?", key) }

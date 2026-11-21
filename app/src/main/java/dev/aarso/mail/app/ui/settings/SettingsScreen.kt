@@ -149,6 +149,9 @@ fun SettingsScreen(onBack: () -> Unit) {
             ChoiceRow("Check every", listOf(15, 30, 60, 180), s.pollMinutes, { if (it < 60) "$it min" else "${it / 60} h" }, { v -> g.updateSettings { it.copy(pollMinutes = v) } })
             TextAction("Check now", Palette.Navy, { Work.syncNow(g.context); app.say("Checking") })
 
+            // ---- search ----
+            SearchSettings()
+
             // ---- intelligence ----
             IntelligenceSettings()
 

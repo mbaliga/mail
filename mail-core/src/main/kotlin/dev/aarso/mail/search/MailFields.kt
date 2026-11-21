@@ -54,6 +54,7 @@ class MailFields(
      * without reading the rows.
      */
     private val labelFolders: () -> Boolean = { true },
+    private val indexText: IndexText = IndexText(),
 ) {
 
     private fun like(v: String) = "%" + v.lowercase().replace("%", "\\%").replace("_", "\\_") + "%"
@@ -139,7 +140,7 @@ class MailFields(
             return cmpText(op, text.lowercase().contains(value.lowercase()))
         }
         override fun sql(op: Op, value: String, ctx: EvalContext): SqlPart {
-            val p = SqlPart("m.id IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?)", listOf("body : " + ftsQuote(value) + "*"), exact = false)
+            val p = SqlPart("m.id IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?)", listOf("body : " + ftsQuote(indexText.forQuery(value) ?: value) + "*"), exact = false)
             return if (op == Op.NE) SqlPart("NOT (${p.sql})", p.args, false) else p
         }
     }
