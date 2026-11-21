@@ -110,3 +110,29 @@ natural language ≈ 1.5 ms (JVM, not a phone).
 - Never put a model identifier in commits, PR text or code comments.
 - Mail logic belongs in `mail-core`/`mail-ai` (JVM-testable); the app only renders and wires.
 - Cloud use is opt-in per task and never for protected categories/accounts; keep `Redactor` in the path.
+
+## 7. Everything pending (consolidated)
+
+**Needs a phone (nothing below has been seen on a device)**
+- Walk the full flow: first run → add account → Home → assistant → tabs/carousel → Find with CJK/Thai mail → compose attach and suggestions.
+- Measure cold start; generate a real baseline profile (the current one is hand-written).
+- First-launch re-index time on a large mailbox; battery cost of background triage; assistant against a real on-device model.
+- Confirm Home's account phrase for several accounts reads "across N mailboxes" (only the single-account wording was rendered).
+- Section switcher: only the Home and All-accounts levels were rendered; check Views and per-account folders.
+
+**Product work not done**
+- Attachment *content* search (PDF, Office): decision needed on a PDF text library; today only file names are indexed.
+- Settings switches for `suggestScreenshots`, `suggestClipboard`, `assistantAuto` (currently defaults only).
+- Provider logos missing: Yahoo, Fastmail, Yandex, Posteo, mailbox.org, Xfinity, Free, Libero, Seznam, NetEase, WEB.DE, T-Online.
+- Icons from the supplied set not yet placed anywhere: alert, exclamation, exit, tools, the curved down-arrow and the inbound arrow.
+- Open tabs are in memory only: they are lost if Android kills the process, and unsaved typing in a draft body is not restored.
+- Assistant: one undo per applied batch (not per suggestion); drafts can't be edited before applying; no run history; can't unsubscribe or move to a folder; make-rule only opens the editor; triage runs only when Home is opened, not on a WorkManager schedule.
+- Thread view: the focused message keeps the full reading view rather than becoming a card; reader titles that wrap to two lines crowd the header buttons.
+- Search: "did you mean" keeps the first letter (slips there aren't caught) and appears only in Find; field weights in relevance ranking are untuned; the in-memory matcher used for mixed OR queries still uses the JDK word breaker, not ICU.
+- Perf not yet great: from+has+older ≈ 120 ms, facets ≈ 160 ms (both while typing), deep paging ≈ 100 ms (not used by the UI).
+
+**Process**
+- Draft PR #3 is unreviewed and unmerged.
+- Flaky `ScreensTest.rules` (cause unknown).
+- CI result for the handoff commit itself not yet seen (docs only).
+- Play: justification for `READ_MEDIA_IMAGES`. Release signing and store listing have not been worked on.
