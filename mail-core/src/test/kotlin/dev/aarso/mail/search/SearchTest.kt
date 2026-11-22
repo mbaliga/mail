@@ -163,7 +163,7 @@ class SearchTest {
         assertTrue(store.header(ids.getValue("news"))!!.isSeen)
         assertEquals(1, store.rules().single().matchCount)
         val sieve = SieveExport.export(listOf(MailRule(name = "gh", query = "from:github.com subject:\"[repo]\"", actions = listOf(RuleAction.MarkRead))) ) { null }
-        assertTrue(sieve.script.contains("address :contains \"from\" \"github.com\""))
+        assertTrue(sieve.script.contains("header :contains \"from\" \"github.com\""))
         assertTrue(sieve.script.contains("addflag \"\\\\Seen\";"))
         assertTrue(rules.diagnose("form:alice").isNotEmpty())
     }

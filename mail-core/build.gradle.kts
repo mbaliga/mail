@@ -39,6 +39,6 @@ tasks.test {
 
 // Performance runs are tuned from the command line: -Dmail.perf.n=250000, -Dmail.perf.experiments=true.
 tasks.test {
-    listOf("mail.perf.n", "mail.perf.experiments").forEach { k -> System.getProperty(k)?.let { systemProperty(k, it) } }
+    listOf("mail.perf.n", "mail.perf.experiments", "sieve.update").forEach { k -> System.getProperty(k)?.let { systemProperty(k, it) } }
     maxHeapSize = "2g"
 }

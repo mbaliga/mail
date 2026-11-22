@@ -62,6 +62,11 @@ class RuleEngine(
     private val effects: RuleEffects = object : RuleEffects {},
     private val clock: Clock = Clock.SYSTEM,
     private val zone: ZoneId = ZoneId.systemDefault(),
+    /**
+     * Which rules a server already carries for an account (see `SieveSync.placements`). A rule on the server is not run here again, and
+     * a rule split between them runs here only the actions the server could not take — so nothing is ever done twice.
+     */
+    private val placements: suspend (accountId: Long) -> Map<Long, dev.aarso.mail.sieve.Placement> = { emptyMap() },
 ) {
     /** Problems a rule's query has, for the editor to show before saving. */
     fun diagnose(query: String): List<Diagnostic> = search.parse(query, natural = false).diagnostics
@@ -155,13 +160,22 @@ class RuleEngine(
         val applied = HashMap<Long, MutableList<String>>()
         var remaining = fresh.map { it.id }.toSet()
         val ctx = ruleContext()
+        val onServer = placements(account.id)
         for (rule in store.rules().filter { it.enabled && RuleTrigger.NEW_MAIL in it.triggers && (it.accountIds.isEmpty() || account.id in it.accountIds) }) {
             if (remaining.isEmpty()) break
             val hits = within(rule, remaining, ctx)
             if (hits.isEmpty()) continue
-            val headers = store.headers(hits)
-            execute(rule, headers, notify)
-            hits.forEach { applied.getOrPut(it) { mutableListOf() } += rule.name }
+            // What the server already did (or will do on delivery) is not done again; the rule still counts for stopProcessing.
+            val place = onServer[rule.id]
+            val mine = when (place?.location) {
+                null, dev.aarso.mail.model.RunLocation.DEVICE, dev.aarso.mail.model.RunLocation.AUTO -> rule
+                dev.aarso.mail.model.RunLocation.SERVER -> null
+                dev.aarso.mail.model.RunLocation.BOTH -> rule.copy(actions = rule.actions.filterIndexed { i, _ -> i !in place.serverActions })
+            }
+            if (mine != null && mine.actions.isNotEmpty()) {
+                execute(mine, store.headers(hits), notify)
+                hits.forEach { applied.getOrPut(it) { mutableListOf() } += rule.name }
+            }
             store.saveRule(rule.copy(matchCount = rule.matchCount + hits.size, lastRunAt = clock.now()))
             if (rule.stopProcessing) remaining = remaining - hits
         }
@@ -290,64 +304,27 @@ class RuleEngine(
 }
 
 /**
- * Export rules as Sieve (RFC 5228) for servers that filter server-side (Fastmail, mailbox.org, Posteo,
- * Dovecot): the subset of the grammar Sieve can express — from/to/subject/list conditions combined
- * with AND, and fileinto/addflag/discard actions. Rules it cannot express are left out and named.
+ * Export rules as a Sieve script (RFC 5228) to paste into a server that filters on its own: the rules that compile for a
+ * server, by [dev.aarso.mail.sieve.SieveCompiler], and the names of those that don't. Only rules that run on arrival are considered.
+ * See that class for exactly what compiles and why a rule is refused rather than approximated.
  */
 object SieveExport {
 
-    data class Result(val script: String, val skipped: List<String>)
+    data class Result(val script: String, val skipped: List<String>, val reasons: Map<String, List<String>> = emptyMap())
 
-    fun export(rules: List<MailRule>, mailboxNameFor: (MailboxRole) -> String?): Result {
-        val skipped = ArrayList<String>()
-        val body = StringBuilder()
-        val requires = linkedSetOf("fileinto", "imap4flags")
-        for (r in rules.filter { it.enabled && RuleTrigger.NEW_MAIL in it.triggers }) {
-            val tests = conditions(r.query) ?: run { skipped += r.name; null } ?: continue
-            val acts = r.actions.mapNotNull { a ->
-                when (a) {
-                    RuleAction.MarkRead -> "addflag \"\\\\Seen\";"
-                    RuleAction.Star -> "addflag \"\\\\Flagged\";"
-                    RuleAction.Trash -> mailboxNameFor(MailboxRole.TRASH)?.let { "fileinto \"${esc(it)}\";" }
-                    RuleAction.Archive -> mailboxNameFor(MailboxRole.ARCHIVE)?.let { "fileinto \"${esc(it)}\";" }
-                    RuleAction.Spam -> mailboxNameFor(MailboxRole.JUNK)?.let { "fileinto \"${esc(it)}\";" }
-                    is RuleAction.MoveTo -> (a.mailbox ?: a.role?.let(mailboxNameFor))?.let { "fileinto \"${esc(it)}\";" }
-                    is RuleAction.Forward -> "redirect :copy \"${esc(a.to)}\";".also { requires += "copy" }
-                    else -> null
-                }
-            }
-            if (acts.isEmpty()) { skipped += r.name; continue }
-            body.append("# ").append(r.name.replace("\n", " ")).append('\n')
-            body.append("if allof(").append(tests.joinToString(", ")).append(") {\n")
-            acts.forEach { body.append("    ").append(it).append('\n') }
-            if (r.stopProcessing) body.append("    stop;\n")
-            body.append("}\n\n")
-        }
-        val header = "# Generated by You've got Mail\nrequire [" + requires.joinToString(", ") { "\"$it\"" } + "];\n\n"
-        return Result(header + body.toString(), skipped)
+    private val defaultParse: (String) -> ParsedQuery by lazy {
+        val fields = dev.aarso.mail.search.MailFields()
+        ({ q: String -> dev.aarso.search.QueryParser.parse(q, fields.registry, dev.aarso.search.EvalContext(0L), ZoneId.of("UTC")) })
     }
 
-    /** `from:x subject:"y z" to:me list:foo` → Sieve tests; null when anything else is present. */
-    private fun conditions(query: String): List<String>? {
-        val tokens = Regex("(-?)(\\w+):(\"[^\"]*\"|\\S+)|(\\S+)").findAll(query).toList()
-        val out = ArrayList<String>()
-        for (t in tokens) {
-            if (t.groupValues[4].isNotEmpty()) return null
-            val negate = t.groupValues[1] == "-"
-            val key = t.groupValues[2].lowercase()
-            val value = esc(t.groupValues[3].trim('"'))
-            val test = when (key) {
-                "from" -> "address :contains \"from\" \"$value\""
-                "to" -> "address :contains [\"to\", \"cc\"] \"$value\""
-                "subject" -> "header :contains \"subject\" \"$value\""
-                "list" -> "header :contains \"list-id\" \"$value\""
-                "domain" -> "address :domain :is \"from\" \"$value\""
-                else -> return null
-            }
-            out += if (negate) "not $test" else test
-        }
-        return out.ifEmpty { null }
-    }
+    fun export(rules: List<MailRule>, mailboxNameFor: (MailboxRole) -> String?): Result = export(rules, defaultParse, mailboxNameFor)
 
-    private fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"")
+    fun export(rules: List<MailRule>, parse: (String) -> ParsedQuery, mailboxNameFor: (MailboxRole) -> String?): Result {
+        val caps = dev.aarso.mail.sieve.ServerCapabilities(
+            dev.aarso.mail.sieve.ServerCapabilities.Transport.MANAGESIEVE, setOf("fileinto", "imap4flags", "copy"),
+            folderName = { role, name -> name ?: role?.let(mailboxNameFor) },
+        )
+        val script = dev.aarso.mail.sieve.SieveCompiler(parse).script(rules.filter { it.enabled && RuleTrigger.NEW_MAIL in it.triggers }, caps)
+        return Result(script.text, script.notPortable.keys.map { it.name }, script.notPortable.mapKeys { it.key.name })
+    }
 }

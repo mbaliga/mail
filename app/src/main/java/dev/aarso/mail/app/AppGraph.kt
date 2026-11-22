@@ -24,6 +24,7 @@ import dev.aarso.mail.digest.DigestBuilder
 import dev.aarso.mail.discovery.AutoDiscovery
 import dev.aarso.mail.intel.HeuristicAnalyzer
 import dev.aarso.mail.model.Account
+import dev.aarso.mail.model.AuthKind
 import dev.aarso.mail.model.Draft
 import dev.aarso.mail.model.MessageHeader
 import dev.aarso.mail.model.SecretRef
@@ -44,6 +45,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -178,7 +180,28 @@ class AppGraph(val context: Context) {
             tldrs.upgrade(messages.map { it.id }, limit = messages.size)
         }
     }
-    val rules = RuleEngine(store, search, actions, effects)
+    /** Keeps the server's Sieve script in step with the rules that can run there; see [dev.aarso.mail.sieve.SieveSync]. */
+    val sieve = dev.aarso.mail.sieve.SieveSync(
+        store, dev.aarso.mail.sieve.SieveCompiler { search.parse(it, natural = false) },
+        credentials = dev.aarso.mail.sieve.SieveCredentials { a ->
+            if (a.auth == AuthKind.PASSWORD || a.auth == AuthKind.APP_PASSWORD) secrets.get(a.secret)?.let { (a.incoming?.username ?: a.email) to it } else null
+        },
+        jmap = dev.aarso.mail.sieve.JmapProvider { a -> runCatching { connector.jmap(a) }.getOrNull() },
+    )
+    val rules = RuleEngine(store, search, actions, effects, placements = { sieve.placements(it) })
+
+    private val _serverRules = MutableStateFlow<Map<Long, dev.aarso.mail.sieve.SieveSync.Outcome>>(emptyMap())
+    /** What the last sync of each account's server rules found, by account id — for the rule editor's "runs on server" line. */
+    val serverRules: StateFlow<Map<Long, dev.aarso.mail.sieve.SieveSync.Outcome>> = _serverRules.asStateFlow()
+
+    /** Put the rules that can run on a server there, account by account. Rules that can't stay on the phone. */
+    suspend fun syncServerRules(allowTakeover: Set<Long> = emptySet()) {
+        val all = store.rules()
+        for (a in store.accounts().filter { it.enabled }) {
+            val out = sieve.sync(a, all, allowTakeover = a.id in allowTakeover)
+            _serverRules.value = _serverRules.value + (a.id to out)
+        }
+    }
 
     // ---- lifecycle ----
 
@@ -211,6 +234,11 @@ class AppGraph(val context: Context) {
 
     fun start() {
         startIndexing()
+        // The server's copy of the rules follows what the person defined — not the counters that tick every time a rule runs.
+        scope.launch {
+            store.observeRules().map { rs -> rs.map { it.copy(matchCount = 0, lastRunAt = 0) } }.distinctUntilChanged().debounce(2_000)
+                .collect { runCatching { syncServerRules() } }
+        }
         // The periodic worker for scheduled rules follows the rules: as often as the shortest needs, or not at all.
         scope.launch {
             store.observeRules().map { dev.aarso.mail.rules.RuleScheduler.wakeEveryMinutes(it) }.distinctUntilChanged()
@@ -248,10 +276,15 @@ class AppGraph(val context: Context) {
 
     /** After any background sync: due reminders, scheduled rules, and the next wake-ups. */
     suspend fun afterSync() {
+        // If a server script was switched off elsewhere, the phone takes those rules back (checked at most hourly per account).
+        val now = System.currentTimeMillis()
+        for (a in store.accounts()) if (now - (lastSieveCheck[a.id] ?: 0L) > 3_600_000L) { lastSieveCheck[a.id] = now; runCatching { sieve.stillActive(a) } }
         runReminders()
         runCatching { rules.runScheduled() }
         scheduleOutbox()
     }
+
+    private val lastSieveCheck = java.util.concurrent.ConcurrentHashMap<Long, Long>()
 
     suspend fun runReminders() {
         val now = System.currentTimeMillis()
