@@ -107,6 +107,8 @@ fun SettingsScreen(onBack: () -> Unit) {
             SectionLabel("Home")
             ChoiceRow("New mail since", DigestWindow.entries, s.digestWindow, { it.phrase }, { w -> g.updateSettings { it.copy(digestWindow = w) } })
             SwitchRow("One-line summaries", s.tldr, { v -> g.updateSettings { it.copy(tldr = v) } }, subtitle = "Who wants what, instead of sender and subject")
+            SwitchRow("Assistant looks through new mail by itself", s.assistantAuto, { v -> g.updateSettings { it.copy(assistantAuto = v) } },
+                subtitle = "On this phone only, at most every six hours; it leaves suggestions and never acts on its own")
             if (saved.isNotEmpty()) {
                 Text("Your views as home tabs", style = Type.body, modifier = Modifier.padding(top = 8.dp))
                 FlowRow(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -127,6 +129,16 @@ fun SettingsScreen(onBack: () -> Unit) {
             // ---- sending ----
             SectionLabel("Sending")
             ChoiceRow("Undo send window", listOf(0, 5, 10, 20, 30), s.undoSendSeconds, { if (it == 0) "Off" else "$it s" }, { v -> g.updateSettings { it.copy(undoSendSeconds = v) } })
+            SwitchRow("Offer what I just copied", s.suggestClipboard, { v -> g.updateSettings { it.copy(suggestClipboard = v) } },
+                subtitle = "While writing, suggests attaching or using the clipboard. Only its type and age are looked at until you accept.")
+            SwitchRow("Offer my latest screenshot", s.suggestScreenshots, { v ->
+                if (!v) g.updateSettings { it.copy(suggestScreenshots = false) }
+                else scope.launch {
+                    // Reading screenshots needs photo access; without it the switch stays off.
+                    val ok = runCatching { bridge.requestPermission(android.Manifest.permission.READ_MEDIA_IMAGES) }.getOrDefault(false)
+                    if (ok) g.updateSettings { it.copy(suggestScreenshots = true) } else app.say("Photo access is needed to see screenshots")
+                }
+            }, subtitle = "While writing, suggests attaching a screenshot you just took. Asks for access to your photos.")
 
             // ---- notifications ----
             SectionLabel("Notifications")

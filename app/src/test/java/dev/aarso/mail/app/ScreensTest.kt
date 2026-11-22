@@ -1,5 +1,6 @@
 package dev.aarso.mail.app
 
+import androidx.compose.ui.test.performScrollTo
 import org.junit.Assert.assertFalse
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertCountEquals
@@ -118,10 +119,15 @@ class ScreensTest {
         Triple("Stratechery", Category.NEWSLETTERS, "Ben Thompson on why aggregators win the AI distribution fight."),
     )
 
+    @org.junit.After
+    fun closeStore() { runCatching { graph.store.close() } }
+
     @Before
     fun seed() {
         val app = ApplicationProvider.getApplicationContext<Application>()
-        File(app.getDatabasePath("mail.db").path).delete()
+        // The database is three files in WAL mode. Deleting only the main one left the last test's -wal and -shm to be replayed
+        // onto the next test's brand-new database — the likely reason a seeded rule sometimes never showed up.
+        for (suffix in listOf("", "-wal", "-shm", "-journal")) File(app.getDatabasePath("mail.db").path + suffix).delete()
         // The provider strip drifts on its own; frozen here so captures stay still (the drift has its own test).
         android.provider.Settings.Global.putFloat(app.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 0f)
         androidx.work.testing.WorkManagerTestInitHelper.initializeTestWorkManager(app)
@@ -462,6 +468,19 @@ class ScreensTest {
         assertEquals(dev.aarso.mail.model.Trigger.OnArrival, r.trigger); assertEquals(dev.aarso.mail.model.Condition.Query("from:@acme.io"), r.effectiveCondition)
         assertEquals(dev.aarso.mail.model.RunLocation.AUTO, r.runLocation); assertFalse(r.confirmed)
         show("rule-editor-from-assistant", waitFor = "Archive Acme mail") { dev.aarso.mail.app.ui.rules.RuleEditor(r) {} }
+    }
+
+    @Test fun settingsSwitchesForTheSuggestionsAndTheAssistant() {
+        show("settings-switches", waitFor = "Offer what I just copied") { dev.aarso.mail.app.ui.settings.SettingsScreen {} }
+        assertTrue(graph.settings.value.suggestClipboard); assertTrue(graph.settings.value.assistantAuto); assertFalse(graph.settings.value.suggestScreenshots)
+        rule.onNodeWithText("Offer what I just copied").performScrollTo().performClick()
+        rule.waitUntil(5_000) { !graph.settings.value.suggestClipboard }
+        rule.onNodeWithText("Assistant looks through new mail by itself").performScrollTo().performClick()
+        rule.waitUntil(5_000) { !graph.settings.value.assistantAuto }
+        // The screenshot switch asks for photo access; the test bridge refuses, so it stays off and says why.
+        rule.onNodeWithText("Offer my latest screenshot").performScrollTo().performClick()
+        rule.waitForIdle()
+        assertFalse(graph.settings.value.suggestScreenshots)
     }
 
     @Test fun reader() = show("reader", waitFor = "refund") { ReaderScreen(firstId, emptyList()) {} }

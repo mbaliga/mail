@@ -1,7 +1,7 @@
 # Handoff — You've got Mail
 
-State as of commit `40229da` on branch `claude/optimistic-pascal-wht0oc` (draft PR
-[mbaliga/mail#3](https://github.com/mbaliga/mail/pull/3); PR #2 is merged into `main`).
+State as of branch `claude/rules-v2`, a draft PR stacked on PR #3 (branch `claude/optimistic-pascal-wht0oc`,
+[mbaliga/mail#3](https://github.com/mbaliga/mail/pull/3)); PR #2 is merged into `main`.
 CI (`build-test`) was green on every pushed commit. **Nothing has been run on a real phone.** Everything
 below is verified by unit tests, Robolectric render tests (screens in `app/build/screens/`, uploaded as a CI
 artifact) and CI only.
@@ -79,6 +79,12 @@ tl;dr toggle, tabs, list.
 - Attach mail by natural language (live search; as `.eml`, quoted, or as context for the writing assistant).
 - Screenshot and clipboard suggestions (clipboard only peeked at until accepted; screenshots need opt-in photo permission).
 
+**Rules v2** (`claude/rules-v2`; details in its PR)
+- `MailRule` extended, not replaced: every new field is defaulted, so rules saved before read back unchanged; schema v4 rewrites saved rules in place (test with a fixture of old rules and a version-3 database). Typed `Trigger`, `Condition` tree (all/any/not over Query, Header, AgeOver, SizeOver, ListId, IsReply, FromKnownContact, InCategory), `CopyTo`, `RunLocation`, forwarding that waits for one confirmation.
+- Pure `RuleEngine.evaluate` and `conflicts` (judged on real mail in the editor); batch engine answers query leaves from the index and structural leaves in SQL; `preview`, `applyToExisting` with one undo, `RuleScheduler` plus a periodic worker that skips a round on Battery Saver.
+- Server side: `SieveCompiler` (golden files per condition and action; refuses what a server would do differently, with the reason), a ManageSieve client (RFC 5804, STARTTLS required), JMAP Sieve (RFC 9661), `SieveSync` (never replaces a script it did not write; remembers which rules the server carries so nothing runs twice; takes rules back if the script is switched off). Gmail filters and Outlook rules are stubs with no network code.
+- Editor as a sentence ("When mail arrives, if …, then …") with the Find typeahead, "Add condition", live "Matches N messages", where it runs and why, one-line conflicts, "Also apply to existing mail" checkbox.
+
 **Performance** — schema v2 composite/covering indexes, partial index for placeholders, FTS rank join, async counts, off-main-thread
 startup, hand-written baseline profile. Seeded 100k messages: list ≈ 5 ms, 1,500 rows ≈ 19 ms, FTS word ≈ 55 ms,
 natural language ≈ 1.5 ms (JVM, not a phone).
@@ -92,15 +98,15 @@ natural language ≈ 1.5 ms (JVM, not a phone).
 4. Tabs: scroll positions are restored, but unsaved typing in a draft body is not (drafts autosave through the store).
 5. Providers with no logo asset (see above). The Microsoft 365 mark is hand-drawn; others are Simple Icons.
 6. `READ_MEDIA_IMAGES` may need a Play-policy justification; the feature is off until the user opts in.
-7. Flaky test: `ScreensTest.rules` timed out intermittently under load (passes alone and on rerun; its seed data is verified). Cause not found; wait timeout raised to 30 s.
+7. `ScreensTest.rules` used to time out now and then. Likely cause, fixed: the test left the previous test's `-wal`/`-shm` files to be replayed onto the next test's new database. The suite passed 10 runs in a row afterwards (it failed about one run in four before); not proven, so watch it.
 8. The thread-card view shows the focused message in the full reading view with its action bar; other messages are cards.
-9. Settings UI has no switches yet for `suggestScreenshots`, `suggestClipboard`, `assistantAuto` (defaults only).
+9. (Done) Settings has switches for the clipboard and screenshot suggestions and the assistant's background look.
 10. PR #3 is still a draft; nothing has been merged since PR #2.
 
 ## 5. Suggested next steps
 - Install the debug APK (CI artifact `app-debug` on the latest run) on a real phone and walk: first run → add account → home →
   assistant → open threads in tabs → Find with CJK mail → compose attach/suggestions.
-- Add the three missing Settings switches (item 9) and logos for the remaining providers.
+- Add logos for the remaining providers.
 - Measure the baseline profile on a device and regenerate it with a macrobenchmark.
 - Decide on attachment text extraction.
 - Mark PR #3 ready and merge once reviewed.
@@ -122,17 +128,21 @@ natural language ≈ 1.5 ms (JVM, not a phone).
 
 **Product work not done**
 - Attachment *content* search (PDF, Office): decision needed on a PDF text library; today only file names are indexed.
-- Settings switches for `suggestScreenshots`, `suggestClipboard`, `assistantAuto` (currently defaults only).
 - Provider logos missing: Yahoo, Fastmail, Yandex, Posteo, mailbox.org, Xfinity, Free, Libero, Seznam, NetEase, WEB.DE, T-Online.
 - Icons from the supplied set not yet placed anywhere: alert, exclamation, exit, tools, the curved down-arrow and the inbound arrow.
 - Open tabs are in memory only: they are lost if Android kills the process, and unsaved typing in a draft body is not restored.
-- Assistant: one undo per applied batch (not per suggestion); drafts can't be edited before applying; no run history; can't unsubscribe or move to a folder; make-rule only opens the editor; triage runs only when Home is opened, not on a WorkManager schedule.
+- Assistant: one undo per applied batch (not per suggestion); drafts can't be edited before applying; no run history; can't unsubscribe or move to a folder; make-rule opens the rule editor prefilled with a real rule (it is saved only when you press Save); triage runs only when Home is opened, not on a WorkManager schedule.
 - Thread view: the focused message keeps the full reading view rather than becoming a card; reader titles that wrap to two lines crowd the header buttons.
 - Search: "did you mean" keeps the first letter (slips there aren't caught) and appears only in Find; field weights in relevance ranking are untuned; the in-memory matcher used for mixed OR queries still uses the JDK word breaker, not ICU.
 - Perf not yet great: from+has+older ≈ 120 ms, facets ≈ 160 ms (both while typing), deep paging ≈ 100 ms (not used by the UI).
+- Rules v2 needs a real server: the ManageSieve client and JMAP Sieve were tested against an in-process fake server and a mock HTTP server only. mailbox.org (`imap.mailbox.org:4190`) and Posteo (`posteo.de:4190`) are taken from the providers' documentation as remembered, not verified here; Fastmail is reached over JMAP Sieve, and whether it also offers ManageSieve is unverified.
+- Rules v2: copy-to-folder is carried out on this phone only for label-style accounts (Gmail, JMAP); on folder-style IMAP accounts it works only through a server script (`fileinto :copy`). A device-side IMAP COPY op was not added because it needs a sync-layer design (placeholder rows, undo of a copy) that was not specified.
+- Rules v2: a rule's Header condition can only test headers the store keeps (from, to, cc, bcc, reply-to, sender, subject, list-id, list-unsubscribe, message-id, in-reply-to, references, authentication-results).
+- Rules v2: the app has no screen yet for "your server already runs a script of its own — replace it?"; `SieveSync` supports the takeover (`allowTakeover`), the editor only reports it.
+- Rules v2: no way yet to see or edit the generated server script; export as Sieve (Rules room) shows the same compile.
 
 **Process**
 - Draft PR #3 is unreviewed and unmerged.
-- Flaky `ScreensTest.rules` (cause unknown).
+- `ScreensTest.rules` flake: probable cause fixed (stale WAL files), 10 clean runs; keep an eye on CI.
 - CI result for the handoff commit itself not yet seen (docs only).
 - Play: justification for `READ_MEDIA_IMAGES`. Release signing and store listing have not been worked on.
