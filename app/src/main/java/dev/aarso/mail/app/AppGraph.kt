@@ -44,6 +44,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -209,6 +211,11 @@ class AppGraph(val context: Context) {
 
     fun start() {
         startIndexing()
+        // The periodic worker for scheduled rules follows the rules: as often as the shortest needs, or not at all.
+        scope.launch {
+            store.observeRules().map { dev.aarso.mail.rules.RuleScheduler.wakeEveryMinutes(it) }.distinctUntilChanged()
+                .collect { runCatching { dev.aarso.mail.app.platform.Work.scheduleRules(context, it) } }
+        }
         scope.launch {
             for (c in settings.value.cloudEngines) secrets.get(SecretRef(c.keyRef))?.let { apiKeys[c.keyRef] = it }
             search.refreshAccounts()

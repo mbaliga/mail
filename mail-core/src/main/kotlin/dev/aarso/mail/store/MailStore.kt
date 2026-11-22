@@ -256,6 +256,15 @@ class MailStore(driver: SQLiteDriver, path: String, val text: dev.aarso.mail.sea
         }
     }
 
+    /** Just the ids of the rows matching [where], newest first, at most [max] — no row is decoded, so listing a hundred thousand is a column scan. */
+    suspend fun idsWhere(where: String, args: List<Any?>, max: Int = Int.MAX_VALUE): List<Long> = db.read {
+        val out = ArrayList<Long>()
+        forEach("SELECT m.id FROM message m CROSS JOIN mailbox mb ON mb.id = m.mailbox_id WHERE $where ORDER BY m.received_at DESC", *args.toTypedArray()) {
+            out += it.long(0); out.size < max
+        }
+        out
+    }
+
     suspend fun ftsIds(match: String, limit: Int = 50_000): Set<Long> = db.read {
         query("SELECT rowid FROM message_fts WHERE message_fts MATCH ? LIMIT ?", match, limit) { it.long(0) }.toHashSet()
     }
@@ -742,6 +751,22 @@ class MailStore(driver: SQLiteDriver, path: String, val text: dev.aarso.mail.sea
                ORDER BY sent_count DESC, last_contact_at DESC LIMIT ?""",
             "$p%", "$p%", "% $p%", limit,
         ) { Contact(it.text(0), it.textOrNull(1), it.int(2), it.int(3), it.long(4)) }
+    }
+
+    /** The members of [ids] whose row satisfies [where] (aliased `m.`) — a column test without decoding the messages. */
+    suspend fun filterIds(ids: Collection<Long>, where: String, args: List<Any?>): List<Long> = db.read {
+        val out = ArrayList<Long>()
+        for (chunk in ids.chunked(5_000)) {
+            out += query("SELECT m.id FROM message m WHERE m.id IN (${chunk.joinToString(",")}) AND ($where)", *args.toTypedArray()) { it.long(0) }
+        }
+        out
+    }
+
+    /** [ids] newest first (by when they arrived), at most [limit] of them. */
+    suspend fun newestFirst(ids: Collection<Long>, limit: Int = Int.MAX_VALUE): List<Long> = db.read {
+        val rows = ArrayList<Pair<Long, Long>>()
+        for (chunk in ids.chunked(5_000)) rows += query("SELECT id, received_at FROM message WHERE id IN (${chunk.joinToString(",")})") { it.long(0) to it.long(1) }
+        rows.sortedWith(compareByDescending<Pair<Long, Long>> { it.second }.thenByDescending { it.first }).take(limit).map { it.first }
     }
 
     /** Addresses the person has written to (lower-case): the "known contacts" a rule can test for. */

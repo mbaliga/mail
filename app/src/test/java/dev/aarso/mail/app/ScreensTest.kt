@@ -396,6 +396,16 @@ class ScreensTest {
         androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().background(Color.White).padding(24.dp)) { dev.aarso.mail.app.ui.settings.SearchSettings() }
     }
 
+    @Test fun scheduledRulesGetAPeriodicJobThatFollowsThem() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val wm = androidx.work.WorkManager.getInstance(app)
+        dev.aarso.mail.app.platform.Work.scheduleRules(app, 60)
+        val queued = wm.getWorkInfosForUniqueWork("rules.scheduled").get()
+        assertEquals(1, queued.size); assertTrue(queued[0].state == androidx.work.WorkInfo.State.ENQUEUED)
+        dev.aarso.mail.app.platform.Work.scheduleRules(app, null)
+        assertTrue("no scheduled rules, no job", wm.getWorkInfosForUniqueWork("rules.scheduled").get().all { it.state == androidx.work.WorkInfo.State.CANCELLED })
+    }
+
     @Test fun reader() = show("reader", waitFor = "refund") { ReaderScreen(firstId, emptyList()) {} }
 
     @Test fun compose() {

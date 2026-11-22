@@ -9,6 +9,7 @@ import dev.aarso.mail.model.MailboxRole
 import dev.aarso.mail.model.MessageHeader
 import dev.aarso.mail.model.NotifyLevel
 import dev.aarso.mail.model.leaves
+import dev.aarso.mail.model.normalized
 import dev.aarso.mail.model.RuleAction
 import dev.aarso.mail.model.RuleTrigger
 import dev.aarso.mail.search.MailSearch
@@ -93,7 +94,14 @@ class RuleEngine(
             }
             else -> {
                 val rc = ctx ?: ruleContext()
-                candidates.chunked(2_000).fold(HashSet<Long>()) { acc, chunk ->
+                // Ask SQL first where it can: an exact column test is the whole answer, a superset leaves only those rows to check.
+                var pool = candidates
+                StructuralSql.of(c, rc.now)?.let { part ->
+                    val hit = store.filterIds(candidates, part.where, part.args)
+                    if (part.exact) return hit.toSet()
+                    pool = hit.toSet()
+                }
+                pool.chunked(2_000).fold(HashSet<Long>()) { acc, chunk ->
                     store.headers(chunk).filterTo(ArrayList()) { ConditionEval.matches(c, it, rc) }.mapTo(acc) { it.id }; acc
                 }
             }
@@ -107,30 +115,37 @@ class RuleEngine(
         return ids
     }
 
-    /** Every message the rule matches in the whole store, in the order a search would list them. */
-    suspend fun idsFor(rule: MailRule, max: Int = 100_000): List<Long> {
-        val plan = ConditionPlanner.plan(rule.effectiveCondition) { search.parse(it, natural = false) }
-        val parsed = ParsedQuery("", plan.narrow, emptyList(), null, emptyList(), emptyList())
-        val scope = SearchScope(accountIds = rule.accountIds, mailboxIds = rule.mailboxIds)
-        val narrowed = search.ids(parsed, scope, max)
-        val residual = plan.residual ?: return narrowed
-        val keep = matchIds(residual, narrowed.toSet())
-        return narrowed.filter { it in keep }
+    private fun parsedOf(narrow: dev.aarso.search.QueryNode?) = ParsedQuery("", narrow, emptyList(), null, emptyList(), emptyList())
+
+    /**
+     * Every message the condition matches within [scope], unordered. Each branch of an "any of" is answered on its own —
+     * a search for the branch the index can answer, a column scan for the others — so one branch with no index does not
+     * drag the whole rule through every message.
+     */
+    private suspend fun matchSet(c: Condition, scope: SearchScope, max: Int): Set<Long> {
+        val plan = ConditionPlanner.plan(c) { search.parse(it, natural = false) }
+        if (plan.residual == null) return search.ids(parsedOf(plan.narrow), scope, max).toSet()
+        if (c is Condition.AnyOf) return c.of.fold(HashSet<Long>()) { acc, child -> acc.addAll(matchSet(child, scope, max)); acc }
+        val narrowed = search.ids(parsedOf(plan.narrow), scope, max)
+        return matchIds(plan.residual, narrowed.toSet())
     }
+
+    /** Every message the rule matches in the whole store, newest first. */
+    suspend fun idsFor(rule: MailRule, max: Int = 100_000): List<Long> =
+        store.newestFirst(matchSet(rule.effectiveCondition.normalized(), SearchScope(accountIds = rule.accountIds, mailboxIds = rule.mailboxIds), max), max)
 
     /** How many messages [rule] matches, and [sampleSize] of them — without changing anything. */
     suspend fun preview(rule: MailRule, sampleSize: Int = 20): RulePreview {
-        val plan = ConditionPlanner.plan(rule.effectiveCondition) { search.parse(it, natural = false) }
+        val c = rule.effectiveCondition.normalized()
         val scope = SearchScope(accountIds = rule.accountIds, mailboxIds = rule.mailboxIds)
-        val parsed = ParsedQuery("", plan.narrow, emptyList(), null, emptyList(), emptyList())
+        val plan = ConditionPlanner.plan(c) { search.parse(it, natural = false) }
         if (plan.residual == null) {
             // Everything the rule says is something the index/SQL can answer: count there, list the newest few.
-            val total = search.count(parsed, scope)
-            val sample = search.search(parsed, scope, limit = sampleSize, countTotal = false).headers.map { it.id }
-            return RulePreview(total, sample)
+            val parsed = parsedOf(plan.narrow)
+            return RulePreview(search.count(parsed, scope), search.search(parsed, scope, limit = sampleSize, countTotal = false).headers.map { it.id })
         }
-        val ids = idsFor(rule)
-        return RulePreview(ids.size, ids.take(sampleSize))
+        val set = matchSet(c, scope, 100_000)
+        return RulePreview(set.size, store.newestFirst(set, sampleSize))
     }
 
     // ---- running ----

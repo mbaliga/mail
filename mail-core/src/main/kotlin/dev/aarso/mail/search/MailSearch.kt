@@ -280,10 +280,7 @@ class MailSearch(
         val c = ctx()
         val plan = plan(parsed, scope, c)
         val out = ArrayList<Long>()
-        if (plan.residual == null) {
-            store.forEachHeader(plan.where, plan.args) { out += it.id; out.size < max }
-            return out
-        }
+        if (plan.residual == null) return store.idsWhere(plan.where, plan.args, max)
         val pending = ArrayList<MessageHeader>(500)
         val all = ArrayList<MessageHeader>()
         store.forEachHeader(plan.where, plan.args) { h -> all += h; all.size < max * 4 }
