@@ -153,6 +153,19 @@ class RuleEngine(
         return RulePreview(set.size, store.newestFirst(set, sampleSize))
     }
 
+    /**
+     * The rules that fight with [rule] (the rest of the list taken from the store, [rule] standing in for its saved self), judged on
+     * real mail: a pair that merely *might* overlap is kept only if one of the [sampleSize] newest messages matches both.
+     */
+    suspend fun conflictsFor(rule: MailRule, sampleSize: Int = 300): List<RuleConflict> {
+        val others = store.rules().filter { it.id != rule.id || rule.id == 0L }
+        val probe = if (rule.id == 0L) rule.copy(id = -1) else rule
+        val found = RuleConflicts.find(others + probe).filter { it.first.id == probe.id || it.second.id == probe.id }
+        if (found.isEmpty()) return found
+        val sample = store.headers(store.newestFirst(search.ids(ParsedQuery("", null, emptyList(), null, emptyList(), emptyList()), SearchScope(), sampleSize), sampleSize))
+        return RuleConflicts.confirmOnSample(found, sample, ruleContext())
+    }
+
     // ---- running ----
 
     suspend fun onNewMail(account: Account, fresh: List<MessageHeader>): RuleOutcome {

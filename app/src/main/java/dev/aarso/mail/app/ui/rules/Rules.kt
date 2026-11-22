@@ -175,116 +175,15 @@ fun RulesRoom(onOpen: (Screen) -> Unit) {
     }
 }
 
-/** Build or change one rule, with a live count of what it would match right now. */
-@Composable
-fun RuleEditor(initial: MailRule?, onClose: () -> Unit) {
-    val app = LocalApp.current
-    val g = app.graph
-    val scope = rememberCoroutineScope()
-    val accounts by g.accounts.collectAsState()
-    var rule by remember { mutableStateOf(initial ?: MailRule(name = "", query = "", actions = listOf(RuleAction.Archive))) }
-    var dry by remember { mutableStateOf<RuleRunResult?>(null) }
-    var addAction by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
-    var confirmRun by remember { mutableStateOf(false) }
-    val diagnostics = remember(rule.query) { if (rule.query.isBlank()) emptyList() else g.rules.diagnose(rule.query) }
-
-    LaunchedEffect(Unit) {
-        snapshotFlow { rule.query to rule.accountIds }.debounce(400).collect { (q, _) ->
-            dry = if (q.isBlank()) null else runCatching { g.rules.dryRun(rule, 20) }.getOrNull()
-        }
-    }
-
-    Page(
-        title = if (initial?.id ?: 0 > 0) "Edit rule" else "New rule",
-        onBack = onClose,
-        footer = {
-            PageFooter(
-                primary = "Save",
-                onPrimary = {
-                    scope.launch {
-                        g.store.saveRule(rule.copy(name = rule.name.ifBlank { rule.query.take(40) }, createdAt = rule.createdAt.takeIf { it > 0 } ?: System.currentTimeMillis()))
-                        onClose()
-                    }
-                },
-                secondary = "Run on existing mail",
-                onSecondary = { confirmRun = true },
-                enabled = rule.query.isNotBlank() && rule.actions.isNotEmpty() && diagnostics.isEmpty(),
-            )
-        },
-    ) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)) {
-            LineField(rule.name, { rule = rule.copy(name = it) }, "Name")
-            SectionLabel("When mail matches")
-            LineField(rule.query, { rule = rule.copy(query = it) }, "from:@github.com subject:\"[PR]\" -is:starred", style = Type.mono, singleLine = false)
-            for (d in diagnostics) Text(d.explain(), style = Type.small.copy(color = Palette.Danger), modifier = Modifier.padding(top = 4.dp))
-            dry?.let { d ->
-                Text("Right now this matches ${countPhrase(d.matched, "message")}", style = Type.small.copy(color = Palette.SheetInkDim), modifier = Modifier.padding(top = 8.dp))
-                for (h in d.sample.take(4)) Text("· ${h.from?.shortName() ?: ""} — ${h.subject}", style = Type.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            if (accounts.size > 1) {
-                SectionLabel("On")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SheetChip("Every account", rule.accountIds.isEmpty(), { rule = rule.copy(accountIds = emptySet()) })
-                    for (a in accounts) SheetChip(a.email, a.id in rule.accountIds, {
-                        rule = rule.copy(accountIds = if (a.id in rule.accountIds) rule.accountIds - a.id else rule.accountIds + a.id)
-                    })
-                }
-            }
-            SectionLabel("Run")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SheetChip("As mail arrives", RuleTrigger.NEW_MAIL in rule.triggers, { rule = rule.copy(triggers = toggle(rule.triggers, RuleTrigger.NEW_MAIL)) })
-                SheetChip("On a schedule", RuleTrigger.SCHEDULED in rule.triggers, { rule = rule.copy(triggers = toggle(rule.triggers, RuleTrigger.SCHEDULED)) })
-                SheetChip("Only when I say", rule.triggers == setOf(RuleTrigger.MANUAL), { rule = rule.copy(triggers = setOf(RuleTrigger.MANUAL)) })
-            }
-            if (RuleTrigger.SCHEDULED in rule.triggers) {
-                FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for ((label, mins) in listOf("Hourly" to 60, "Every 6 h" to 360, "Daily" to 1440, "Weekly" to 10080)) SheetChip(label, rule.intervalMinutes == mins, { rule = rule.copy(intervalMinutes = mins) })
-                }
-            }
-            SectionLabel("Do")
-            for ((i, a) in rule.actions.withIndex()) Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(a.describe().replaceFirstChar { it.uppercase() }, style = Type.body, modifier = Modifier.weight(1f))
-                IconAction(HyIcons.close, "Remove", Palette.SheetInk, { rule = rule.copy(actions = rule.actions.filterIndexed { j, _ -> j != i }) })
-            }
-            TextAction("+ Add an action", Palette.Navy, { addAction = true })
-            SwitchRow("Stop here", rule.stopProcessing, { rule = rule.copy(stopProcessing = it) }, subtitle = "Later rules won't see mail this one matched")
-            SwitchRow("On", rule.enabled, { rule = rule.copy(enabled = it) })
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (rule.id > 0) TextAction("Delete rule", Palette.Danger, { confirmDelete = true })
-            }
-            Spacer(Modifier.height(32.dp))
-        }
-    }
-
-    if (addAction) ActionPicker(onDismiss = { addAction = false }, onPick = { a -> addAction = false; rule = rule.copy(actions = rule.actions + a) })
-    if (confirmDelete) ConfirmDialog("Delete this rule?", "Mail it already moved stays where it is.", "Delete", { confirmDelete = false }) {
-        confirmDelete = false
-        scope.launch { g.store.deleteRule(rule.id); onClose() }
-    }
-    if (confirmRun) ConfirmDialog(
-        "Run now?", "This applies “${rule.actions.joinToString(", ") { it.describe() }}” to ${countPhrase(dry?.matched ?: 0, "message")} that match today.", "Run",
-        { confirmRun = false },
-    ) {
-        confirmRun = false
-        scope.launch {
-            val saved = g.store.saveRule(rule.copy(name = rule.name.ifBlank { rule.query.take(40) }))
-            rule = saved
-            val n = g.rules.run(saved)
-            app.say("Applied to ${countPhrase(n, "message")}")
-        }
-    }
-}
-
-private fun <T> toggle(s: Set<T>, v: T): Set<T> = (if (v in s) s - v else s + v).ifEmpty { setOf(v) }
+internal fun <T> toggle(s: Set<T>, v: T): Set<T> = (if (v in s) s - v else s + v).ifEmpty { setOf(v) }
 
 @Composable
-private fun ActionPicker(onDismiss: () -> Unit, onPick: (RuleAction) -> Unit) {
+internal fun ActionPicker(onDismiss: () -> Unit, onPick: (RuleAction) -> Unit) {
     var needs by remember { mutableStateOf<String?>(null) }
     var value by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
     var move by remember { mutableStateOf(false) }
+    var copy by remember { mutableStateOf(false) }
     var category by remember { mutableStateOf(false) }
     MailBottomSheet(onDismiss) {
         Text("Then", style = Type.heading)
@@ -298,6 +197,7 @@ private fun ActionPicker(onDismiss: () -> Unit, onPick: (RuleAction) -> Unit) {
                 SheetRow("Mute the conversation", { onPick(RuleAction.Mute) }, HyIcons.bellOff)
                 SheetRow("Mark as spam", { onPick(RuleAction.Spam) }, HyIcons.shield)
                 SheetRow("Move to a folder…", { move = true }, HyIcons.folder)
+                SheetRow("Copy to a folder…", { copy = true }, HyIcons.folder)
                 SheetRow("Label…", { needs = "label" }, HyIcons.tag)
                 SheetRow("Put in a tab…", { category = true }, HyIcons.layers)
                 SheetRow("Snooze for…", { needs = "snooze" }, HyIcons.snooze)
@@ -321,5 +221,6 @@ private fun ActionPicker(onDismiss: () -> Unit, onPick: (RuleAction) -> Unit) {
         }
     }
     if (move) MoveSheet(emptySet(), { move = false }) { b -> move = false; onPick(if (b.role != MailboxRole.NONE) RuleAction.MoveTo(role = b.role) else RuleAction.MoveTo(mailbox = b.name)) }
+    if (copy) MoveSheet(emptySet(), { copy = false }) { b -> copy = false; onPick(if (b.role != MailboxRole.NONE) RuleAction.CopyTo(role = b.role) else RuleAction.CopyTo(mailbox = b.name)) }
     if (category) CategorySheet(null, { category = false }) { c -> category = false; onPick(RuleAction.Categorize(c)) }
 }

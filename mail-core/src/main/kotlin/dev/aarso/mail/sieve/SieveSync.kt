@@ -116,6 +116,31 @@ class SieveSync(
         }
     }
 
+    /** Where a rule would run, and if not on a server, why not — for the editor, before anything is saved or any server is contacted. */
+    data class PlacementPreview(val location: RunLocation, val reasons: List<String>, val account: Account? = null)
+
+    fun previewPlacement(rule: MailRule, accounts: List<Account>): PlacementPreview {
+        if (rule.runLocation == RunLocation.DEVICE) return PlacementPreview(RunLocation.DEVICE, listOf("you chose to keep it on this phone"))
+        val mine = accounts.filter { it.enabled && (rule.accountIds.isEmpty() || it.id in rule.accountIds) }
+        if (mine.isEmpty()) return PlacementPreview(RunLocation.DEVICE, listOf("there is no account for it yet"))
+        // A reason about the rule itself ("it uses tabs") says more than one about an account that has no server rules at all.
+        var firstReason: List<String>? = null; var accountReason: List<String>? = null
+        for (a in mine) {
+            when (val ep = SieveSupport.endpointFor(a)) {
+                is SieveEndpoint.None -> accountReason = accountReason ?: listOf(ep.why)
+                else -> {
+                    val caps = ServerCapabilities(if (ep is SieveEndpoint.Jmap) ServerCapabilities.Transport.JMAP else ServerCapabilities.Transport.MANAGESIEVE,
+                        setOf("fileinto", "imap4flags", "copy"), a.myAddresses) { r, n -> n ?: r?.name }
+                    when (val c = compiler.compile(rule, caps)) {
+                        is Compiled -> return PlacementPreview(RunLocation.SERVER, emptyList(), a)
+                        is NotPortable -> firstReason = firstReason ?: c.reasons
+                    }
+                }
+            }
+        }
+        return PlacementPreview(RunLocation.DEVICE, (firstReason ?: accountReason).orEmpty())
+    }
+
     suspend fun sync(account: Account, allRules: List<MailRule>, allowTakeover: Boolean = false): Outcome = withContext(Dispatchers.IO) {
         val rules = allRules.filter { it.enabled && (it.accountIds.isEmpty() || account.id in it.accountIds) }
         when (val ep = SieveSupport.endpointFor(account)) {

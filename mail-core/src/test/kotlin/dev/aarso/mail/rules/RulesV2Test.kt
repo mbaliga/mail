@@ -365,4 +365,48 @@ class RulesV2Test {
         assertNull(RuleScheduler.nextRunAt(r.copy(triggers = setOf(RuleTrigger.MANUAL)), now))
         assertEquals(30, RuleScheduler.wakeEveryMinutes(listOf(r, r.copy(intervalMinutes = 30))))
     }
+
+    // ---- what the editor needs ----
+
+    @Test fun `the editor's form and the condition tree convert both ways`() {
+        fun rt(c: Condition) = ConditionForm.from(c)!!.toCondition()
+        assertEquals(Condition.Query("from:a"), rt(Condition.Query("from:a")))
+        val sizeLeaf = Condition.SizeOver(5)
+        assertEquals(Condition.All(listOf(Condition.Query("x"), sizeLeaf)), rt(Condition.All(listOf(sizeLeaf, Condition.Query("x")))))   // the search box comes first
+        val f = ConditionForm.from(Condition.AnyOf(listOf(Condition.Query("x"), Condition.Not(Condition.IsReply), Condition.AgeOver(60))))!!
+        assertEquals("x", f.query); assertTrue(f.any); assertEquals(listOf(ConditionForm.Item(Condition.IsReply, negated = true), ConditionForm.Item(Condition.AgeOver(60))), f.extras)
+        assertTrue(f.isGroup)
+        assertFalse("a lone search is not a group", ConditionForm("x").isGroup)
+        assertFalse("an extra alone is not a group", ConditionForm("", listOf(ConditionForm.Item(Condition.IsReply))).isGroup)
+        assertEquals("a bare leaf has an empty search box", ConditionForm("", listOf(ConditionForm.Item(Condition.IsReply))), ConditionForm.from(Condition.IsReply))
+        assertEquals(Condition.Query(""), ConditionForm("").toCondition())
+        assertNull("groups inside groups are left as they are", ConditionForm.from(Condition.All(listOf(Condition.Query("a"), Condition.AnyOf(listOf(Condition.IsReply, Condition.AgeOver(1)))))))
+        assertNull(ConditionForm.from(Condition.Not(Condition.AnyOf(listOf(Condition.IsReply, Condition.AgeOver(1))))))
+    }
+
+    @Test fun `a lone search stays a plain query rule, a group keeps a readable summary`() {
+        val base = MailRule(name = "n", query = "old", actions = listOf(RuleAction.Archive))
+        val plain = ConditionForm("from:alice").toRule(base)
+        assertEquals("from:alice", plain.query); assertNull(plain.condition)
+        val group = ConditionForm("from:alice", listOf(ConditionForm.Item(Condition.AgeOver(14 * 24 * 60))), any = false).toRule(base)
+        assertEquals("from:alice and older than 2 weeks", group.query)
+        assertEquals(Condition.All(listOf(Condition.Query("from:alice"), Condition.AgeOver(14 * 24 * 60))), group.condition)
+        assertEquals(ConditionForm.from(group), ConditionForm("from:alice", listOf(ConditionForm.Item(Condition.AgeOver(14 * 24 * 60)))))
+    }
+
+    @Test fun `conflicts for the rule being edited are judged on real mail`() = runBlocking {
+        store.saveRule(MailRule(name = "Receipts", query = "from:@acme.io", actions = listOf(RuleAction.MoveTo(mailbox = "Receipts"))), sortOrder = 1)
+        val finance = MailRule(name = "Finance", query = "from:@acme.io", actions = listOf(RuleAction.MoveTo(mailbox = "Finance")))
+        val c = engine.conflictsFor(finance).single()
+        assertTrue(c.certain); assertTrue(c.summary.contains("Receipts") && c.summary.contains("Finance"))
+        // Might overlap, and does: Priya's messages are replies from a known contact.
+        store.saveRule(MailRule(name = "Replies", query = "", condition = Condition.IsReply, actions = listOf(RuleAction.Trash)), sortOrder = 2)
+        val star = MailRule(name = "Star Priya", query = "from:priya", actions = listOf(RuleAction.Star))
+        assertEquals(1, engine.conflictsFor(star).count { it.summary.contains("Star Priya") })
+        // Might overlap, and does not: nothing in the mailbox is both.
+        val acme = MailRule(name = "Acme stars", query = "from:@acme.io", actions = listOf(RuleAction.Star))
+        assertTrue(engine.conflictsFor(acme).none { it.summary.contains("Replies") })
+        // An unrelated rule has none.
+        assertTrue(engine.conflictsFor(MailRule(name = "Other", query = "from:@github.com", actions = listOf(RuleAction.MarkRead))).isEmpty())
+    }
 }

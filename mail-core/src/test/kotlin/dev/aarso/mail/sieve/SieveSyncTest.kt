@@ -232,4 +232,21 @@ class SieveSyncTest {
         val sy2 = SieveSync(store, compiler, SieveCredentials { null }, JmapProvider { JmapClient(plain.url("/session").toString(), JmapAuth.Basic("me", "pw")) })
         assertTrue(sy2.sync(acct, listOf(work)) is SieveSync.Outcome.Unsupported)
     }
+
+    @Test fun `the editor can ask where a rule would run before anything is saved`() {
+        val sy = sync(manage())
+        val ok = sy.previewPlacement(work, listOf(account))
+        assertEquals(RunLocation.SERVER, ok.location); assertTrue(ok.reasons.isEmpty()); assertEquals(account.id, ok.account!!.id)
+        val tab = sy.previewPlacement(tabs, listOf(account))
+        assertEquals(RunLocation.DEVICE, tab.location); assertTrue(tab.reasons.single().contains("tabs"))
+        assertEquals(RunLocation.DEVICE, sy.previewPlacement(phone, listOf(account)).location)
+        val gmail = sy.previewPlacement(work, listOf(account.copy(providerId = "gmail")))
+        assertEquals(RunLocation.DEVICE, gmail.location); assertTrue(gmail.reasons.single().contains("Gmail"))
+        assertEquals("a second account that can does it", RunLocation.SERVER, sy.previewPlacement(work, listOf(account.copy(id = 9, providerId = "gmail"), account)).location)
+        assertEquals(RunLocation.DEVICE, sy.previewPlacement(work, emptyList()).location)
+        assertEquals("a rule limited to one account looks only there", RunLocation.DEVICE, sy.previewPlacement(work.copy(accountIds = setOf(9)), listOf(account.copy(id = 9, providerId = "gmail"), account)).location)
+        val forward = rule(7, "Forward", "from:x", RuleAction.Forward("a@b.c"))
+        assertTrue("forwarding waits for confirmation", sy.previewPlacement(forward, listOf(account)).reasons.single().contains("confirm"))
+        assertEquals(RunLocation.SERVER, sy.previewPlacement(forward.copy(confirmed = true), listOf(account)).location)
+    }
 }
