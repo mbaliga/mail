@@ -2,10 +2,13 @@ package dev.aarso.mail.rules
 
 import dev.aarso.mail.model.Account
 import dev.aarso.mail.model.ClassificationSource
+import dev.aarso.mail.model.Condition
+import dev.aarso.mail.model.IncomingProtocol
 import dev.aarso.mail.model.MailRule
 import dev.aarso.mail.model.MailboxRole
 import dev.aarso.mail.model.MessageHeader
 import dev.aarso.mail.model.NotifyLevel
+import dev.aarso.mail.model.leaves
 import dev.aarso.mail.model.RuleAction
 import dev.aarso.mail.model.RuleTrigger
 import dev.aarso.mail.search.MailSearch
@@ -13,7 +16,10 @@ import dev.aarso.mail.search.SearchScope
 import dev.aarso.mail.store.MailStore
 import dev.aarso.mail.sync.Clock
 import dev.aarso.mail.sync.MailActions
+import dev.aarso.mail.sync.UndoToken
 import dev.aarso.search.Diagnostic
+import dev.aarso.search.ParsedQuery
+import java.time.ZoneId
 
 /** Things a rule can cause that are not local state: sending mail, calling a model. Implemented by the app. */
 interface RuleEffects {
@@ -27,14 +33,26 @@ data class RuleRunResult(val rule: MailRule, val matched: Int, val sample: List<
 /** Per-message notification decision after rules ran (the strongest rule wins; NEVER beats all). */
 data class RuleOutcome(val notify: Map<Long, NotifyLevel>, val applied: Map<Long, List<String>>)
 
+/** One rule's action chosen for a message — what [RuleEngine.evaluateDetailed] returns. */
+data class AppliedAction(val rule: MailRule, val action: RuleAction)
+
+/** How many messages a rule would touch, and a few of them. */
+data class RulePreview(val count: Int, val sampleIds: List<Long>)
+
+/** What applying a rule to existing mail did. [undo] undoes all of it at once; [skipped] says what could not be carried out here and why. */
+data class ApplyResult(val matched: Int, val undo: UndoToken?, val skipped: List<String>)
+
 /**
- * Rules: a saved query and the actions to take on whatever it matches — on new mail, on demand, or
+ * Rules: when (a trigger), which mail (a condition tree), do what (actions) — on new mail, on demand, or
  * on a schedule ("every night, archive newsletters older than a week").
  *
- * The condition *is* a search query, so "test this rule" runs it as a search and shows exactly the
- * messages it would touch before anything happens. Rules run in order; `stopProcessing` hides a
- * matched message from the rules after it. Actions go through [MailActions], so everything a rule
- * does is queued, synced and undoable like a person's own action.
+ * The condition is, at heart, a search query: "test this rule" runs it as a search and shows exactly the
+ * messages it would touch before anything happens. Rules run in order; `stopProcessing` hides a matched message
+ * from the rules after it. Actions go through [MailActions], so everything a rule does is queued, synced and
+ * undoable like a person's own action.
+ *
+ * Two ways in, kept consistent by tests: the pure [evaluate] (one message in, actions out — no database), and the
+ * batch paths on this class, which resolve whole sets of messages with the index and are what actually run.
  */
 class RuleEngine(
     private val store: MailStore,
@@ -42,24 +60,89 @@ class RuleEngine(
     private val actions: MailActions,
     private val effects: RuleEffects = object : RuleEffects {},
     private val clock: Clock = Clock.SYSTEM,
+    private val zone: ZoneId = ZoneId.systemDefault(),
 ) {
     /** Problems a rule's query has, for the editor to show before saving. */
     fun diagnose(query: String): List<Diagnostic> = search.parse(query, natural = false).diagnostics
 
+    /** Problems any query leaf of [c] has. */
+    fun diagnose(c: Condition): List<Diagnostic> = c.leaves().filterIsInstance<Condition.Query>().flatMap { diagnose(it.q) }
+
     suspend fun dryRun(rule: MailRule, limit: Int = 50): RuleRunResult {
-        val parsed = search.parse(rule.query, natural = false)
-        val scope = SearchScope(accountIds = rule.accountIds)
-        val result = search.search(parsed, scope, limit = limit)
-        return RuleRunResult(rule, result.total ?: search.count(parsed, scope), result.headers)
+        val p = preview(rule, limit)
+        return RuleRunResult(rule, p.count, store.headers(p.sampleIds))
     }
+
+    // ---- matching ----
+
+    private suspend fun ruleContext(): RuleContext {
+        val known = store.knownAddresses()
+        return RuleContext(search.queryMatcher(), clock.now(), zone) { it in known }
+    }
+
+    /** The members of [candidates] that satisfy [c]: exact, with full-text leaves answered by the index. */
+    internal suspend fun matchIds(c: Condition, candidates: Set<Long>, ctx: RuleContext? = null): Set<Long> {
+        if (candidates.isEmpty()) return emptySet()
+        return when (c) {
+            is Condition.All -> { var acc = candidates; for (child in c.of) { if (acc.isEmpty()) break; acc = matchIds(child, acc, ctx) }; acc }
+            is Condition.AnyOf -> c.of.fold(emptySet<Long>()) { acc, child -> acc + matchIds(child, candidates - acc, ctx) }
+            is Condition.Not -> candidates - matchIds(c.of, candidates, ctx)
+            is Condition.Query -> if (c.q.isBlank()) candidates else {
+                val parsed = search.parse(c.q, natural = false)
+                candidates.chunked(5_000).fold(emptySet<Long>()) { acc, chunk -> acc + search.matchesAmong(parsed, chunk.toSet()) }
+            }
+            else -> {
+                val rc = ctx ?: ruleContext()
+                candidates.chunked(2_000).fold(HashSet<Long>()) { acc, chunk ->
+                    store.headers(chunk).filterTo(ArrayList()) { ConditionEval.matches(c, it, rc) }.mapTo(acc) { it.id }; acc
+                }
+            }
+        }
+    }
+
+    private suspend fun within(rule: MailRule, candidates: Set<Long>, ctx: RuleContext?): Set<Long> {
+        var ids = matchIds(rule.effectiveCondition, candidates, ctx)
+        if (ids.isNotEmpty() && rule.mailboxIds.isNotEmpty()) ids = store.headers(ids).filter { it.mailboxId in rule.mailboxIds }.mapTo(HashSet()) { it.id }
+        if (ids.isNotEmpty() && rule.accountIds.isNotEmpty()) ids = store.headers(ids).filter { it.accountId in rule.accountIds }.mapTo(HashSet()) { it.id }
+        return ids
+    }
+
+    /** Every message the rule matches in the whole store, in the order a search would list them. */
+    suspend fun idsFor(rule: MailRule, max: Int = 100_000): List<Long> {
+        val plan = ConditionPlanner.plan(rule.effectiveCondition) { search.parse(it, natural = false) }
+        val parsed = ParsedQuery("", plan.narrow, emptyList(), null, emptyList(), emptyList())
+        val scope = SearchScope(accountIds = rule.accountIds, mailboxIds = rule.mailboxIds)
+        val narrowed = search.ids(parsed, scope, max)
+        val residual = plan.residual ?: return narrowed
+        val keep = matchIds(residual, narrowed.toSet())
+        return narrowed.filter { it in keep }
+    }
+
+    /** How many messages [rule] matches, and [sampleSize] of them — without changing anything. */
+    suspend fun preview(rule: MailRule, sampleSize: Int = 20): RulePreview {
+        val plan = ConditionPlanner.plan(rule.effectiveCondition) { search.parse(it, natural = false) }
+        val scope = SearchScope(accountIds = rule.accountIds, mailboxIds = rule.mailboxIds)
+        val parsed = ParsedQuery("", plan.narrow, emptyList(), null, emptyList(), emptyList())
+        if (plan.residual == null) {
+            // Everything the rule says is something the index/SQL can answer: count there, list the newest few.
+            val total = search.count(parsed, scope)
+            val sample = search.search(parsed, scope, limit = sampleSize, countTotal = false).headers.map { it.id }
+            return RulePreview(total, sample)
+        }
+        val ids = idsFor(rule)
+        return RulePreview(ids.size, ids.take(sampleSize))
+    }
+
+    // ---- running ----
 
     suspend fun onNewMail(account: Account, fresh: List<MessageHeader>): RuleOutcome {
         val notify = HashMap<Long, NotifyLevel>()
         val applied = HashMap<Long, MutableList<String>>()
         var remaining = fresh.map { it.id }.toSet()
+        val ctx = ruleContext()
         for (rule in store.rules().filter { it.enabled && RuleTrigger.NEW_MAIL in it.triggers && (it.accountIds.isEmpty() || account.id in it.accountIds) }) {
             if (remaining.isEmpty()) break
-            val hits = search.matchesAmong(search.parse(rule.query, natural = false), remaining)
+            val hits = within(rule, remaining, ctx)
             if (hits.isEmpty()) continue
             val headers = store.headers(hits)
             execute(rule, headers, notify)
@@ -71,47 +154,63 @@ class RuleEngine(
     }
 
     /** Run a rule over existing mail now. Returns how many messages it acted on. */
-    suspend fun run(rule: MailRule, max: Int = 100_000): Int {
-        val ids = search.ids(search.parse(rule.query, natural = false), SearchScope(accountIds = rule.accountIds), max)
-        if (ids.isEmpty()) return 0
-        for (chunk in ids.chunked(2000)) execute(rule, store.headers(chunk), HashMap())
+    suspend fun run(rule: MailRule, max: Int = 100_000): Int = applyToExisting(rule, max).matched
+
+    /**
+     * Run [rule] over everything it matches now, as one batch through the op queue. Every change it makes is
+     * covered by the single [ApplyResult.undo].
+     */
+    suspend fun applyToExisting(rule: MailRule, max: Int = 100_000): ApplyResult {
+        val ids = idsFor(rule, max)
+        if (ids.isEmpty()) return ApplyResult(0, null, emptyList())
+        val tokens = ArrayList<UndoToken>()
+        val skipped = ArrayList<String>()
+        for (chunk in ids.chunked(2000)) execute(rule, store.headers(chunk), HashMap(), tokens, skipped)
         store.saveRule(rule.copy(matchCount = rule.matchCount + ids.size, lastRunAt = clock.now()))
-        return ids.size
+        return ApplyResult(ids.size, if (tokens.isEmpty()) null else MailActions.combine("Ran “${rule.name}”", tokens), skipped.distinct())
     }
 
     /** Scheduled rules whose interval has elapsed. */
     suspend fun runScheduled(): Int {
-        val now = clock.now()
         var total = 0
-        for (rule in store.rules().filter { it.enabled && RuleTrigger.SCHEDULED in it.triggers }) {
-            if (now - rule.lastRunAt >= rule.intervalMinutes * 60_000L) total += run(rule)
-        }
+        for (rule in RuleScheduler.due(store.rules(), clock.now())) total += run(rule)
         return total
     }
 
-    private suspend fun execute(rule: MailRule, headers: List<MessageHeader>, notify: MutableMap<Long, NotifyLevel>) {
+    private suspend fun execute(
+        rule: MailRule, headers: List<MessageHeader>, notify: MutableMap<Long, NotifyLevel>,
+        tokens: MutableList<UndoToken> = ArrayList(), skipped: MutableList<String> = ArrayList(),
+    ) {
         val ids = headers.map { it.id }
-        for (action in rule.actions) {
+        // Mail leaves the phone only for a rule the person has confirmed.
+        val todo = if (rule.confirmed) rule.actions else rule.actions.filterNot { it.needsConfirmation }
+        for (action in todo) {
             when (action) {
-                RuleAction.MarkRead -> actions.markRead(ids, true)
-                RuleAction.MarkUnread -> actions.markRead(ids, false)
-                RuleAction.Star -> actions.star(ids, true)
-                RuleAction.Unstar -> actions.star(ids, false)
-                RuleAction.Archive -> actions.archive(ids)
-                RuleAction.Trash -> actions.trash(ids)
-                RuleAction.Spam -> actions.spam(ids)
-                RuleAction.Pin -> actions.pin(ids)
-                RuleAction.Mute -> actions.mute(ids)
+                RuleAction.MarkRead -> tokens += actions.markRead(ids, true)
+                RuleAction.MarkUnread -> tokens += actions.markRead(ids, false)
+                RuleAction.Star -> tokens += actions.star(ids, true)
+                RuleAction.Unstar -> tokens += actions.star(ids, false)
+                RuleAction.Archive -> tokens += actions.archive(ids)
+                RuleAction.Trash -> tokens += actions.trash(ids)
+                RuleAction.Spam -> tokens += actions.spam(ids)
+                RuleAction.Pin -> tokens += actions.pin(ids)
+                RuleAction.Mute -> tokens += actions.mute(ids)
                 RuleAction.Summarize -> effects.summarize(headers)
                 is RuleAction.MoveTo -> for ((acc, hs) in headers.groupBy { it.accountId }) {
                     val box = action.role?.let { store.mailboxByRole(acc, it) }
                         ?: action.mailbox?.let { name -> store.mailboxes(acc).firstOrNull { it.remoteId == name || it.name.equals(name, true) } }
-                    if (box != null) actions.moveTo(hs.map { it.id }, box.id)
+                    if (box != null) tokens += actions.moveTo(hs.map { it.id }, box.id)
                 }
-                is RuleAction.AddLabel -> actions.label(ids, listOf(action.label))
-                is RuleAction.RemoveLabel -> actions.label(ids, emptyList(), listOf(action.label))
+                is RuleAction.CopyTo -> for ((acc, hs) in headers.groupBy { it.accountId }) {
+                    val account = store.account(acc)
+                    val name = action.mailbox ?: action.role?.name
+                    if (account != null && name != null && usesLabels(account)) tokens += actions.label(hs.map { it.id }, listOf(name))
+                    else skipped += "Copy to a folder isn't done on this phone for ${account?.email ?: "that account"}; it needs the server"
+                }
+                is RuleAction.AddLabel -> tokens += actions.label(ids, listOf(action.label))
+                is RuleAction.RemoveLabel -> tokens += actions.label(ids, emptyList(), listOf(action.label))
                 is RuleAction.Categorize -> store.setCategory(ids, action.category, ClassificationSource.RULE)
-                is RuleAction.Snooze -> actions.snooze(ids, clock.now() + action.minutes * 60_000L)
+                is RuleAction.Snooze -> tokens += actions.snooze(ids, clock.now() + action.minutes * 60_000L)
                 is RuleAction.Notify -> ids.forEach { id ->
                     val prev = notify[id]
                     notify[id] = if (prev == null || action.level == NotifyLevel.NEVER || action.level.ordinal < prev.ordinal) action.level else prev
@@ -121,6 +220,11 @@ class RuleEngine(
             }
         }
     }
+
+    /** Label-style accounts (Gmail, JMAP) have no folders to copy into; a copy is a label. */
+    private suspend fun usesLabels(a: Account): Boolean =
+        a.protocol == IncomingProtocol.JMAP || a.providerId.contains("gmail", true) || a.providerId.contains("google", true) ||
+            store.mailboxByRole(a.id, MailboxRole.ALL) != null
 
     /** Rules people tend to want, offered from the rule editor and from a selection ("always do this"). */
     fun suggestionsFor(h: MessageHeader): List<MailRule> = buildList {
@@ -142,6 +246,31 @@ class RuleEngine(
             MailRule(name = "Codes notify urgently", query = "category:otp", actions = listOf(RuleAction.Notify(NotifyLevel.URGENT))),
             MailRule(name = "Replies notify", query = "category:replies", actions = listOf(RuleAction.Notify(NotifyLevel.URGENT))),
         )
+
+        /**
+         * The actions that apply to one message, in rule order — a pure function. Disabled rules, rules whose trigger
+         * is not [on], and rules whose scope excludes the message are skipped; a matching rule with
+         * `stopProcessing` ends the walk. Actions that send mail outward (needsConfirmation) are left out for a
+         * rule the person has not confirmed once.
+         */
+        fun evaluateDetailed(rules: List<MailRule>, message: MessageHeader, ctx: RuleContext, on: RuleTrigger = RuleTrigger.NEW_MAIL): List<AppliedAction> {
+            val out = ArrayList<AppliedAction>()
+            for (rule in rules.sortedWith(compareBy({ it.order }, { it.id }))) {
+                if (!rule.enabled || on !in rule.triggers) continue
+                if (rule.accountIds.isNotEmpty() && message.accountId !in rule.accountIds) continue
+                if (rule.mailboxIds.isNotEmpty() && message.mailboxId !in rule.mailboxIds) continue
+                if (!ConditionEval.matches(rule.effectiveCondition, message, ctx)) continue
+                for (a in rule.actions) if (rule.confirmed || !a.needsConfirmation) out += AppliedAction(rule, a)
+                if (rule.stopProcessing) break
+            }
+            return out
+        }
+
+        fun evaluate(rules: List<MailRule>, message: MessageHeader, ctx: RuleContext, on: RuleTrigger = RuleTrigger.NEW_MAIL): List<RuleAction> =
+            evaluateDetailed(rules, message, ctx, on).map { it.action }
+
+        /** Pairs of rules whose actions fight over the same mail. See [RuleConflicts]. */
+        fun conflicts(rules: List<MailRule>): List<RuleConflict> = RuleConflicts.find(rules)
     }
 }
 

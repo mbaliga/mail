@@ -689,16 +689,17 @@ class MailStore(driver: SQLiteDriver, path: String, val text: dev.aarso.mail.sea
     suspend fun deleteDraft(id: Long) = db.write(setOf("draft")) { exec("DELETE FROM draft WHERE id = ?", id) }
 
     suspend fun rules(): List<MailRule> = db.read {
-        query("SELECT id, json FROM rule ORDER BY sort_order, id") { r -> json.decodeFromString(MailRule.serializer(), r.text(1)).copy(id = r.long(0)) }
+        query("SELECT id, json, sort_order FROM rule ORDER BY sort_order, id") { r -> json.decodeFromString(MailRule.serializer(), r.text(1)).copy(id = r.long(0), order = r.long(2).toInt()) }
     }
     fun observeRules(): Flow<List<MailRule>> = db.observe(setOf("rule")) { rules() }
 
-    suspend fun saveRule(rule: MailRule, sortOrder: Int = 0): MailRule = db.write(setOf("rule")) {
+    suspend fun saveRule(rule: MailRule, sortOrder: Int = rule.order): MailRule = db.write(setOf("rule")) {
         if (rule.id == 0L) {
-            val id = insert("INSERT INTO rule(json, sort_order) VALUES (?, ?)", json.encodeToString(MailRule.serializer(), rule), sortOrder)
-            rule.copy(id = id)
+            val id = insert("INSERT INTO rule(json, sort_order) VALUES (?, ?)", json.encodeToString(MailRule.serializer(), rule.copy(order = sortOrder)), sortOrder)
+            rule.copy(id = id, order = sortOrder)
         } else {
-            exec("UPDATE rule SET json = ? WHERE id = ?", json.encodeToString(MailRule.serializer(), rule), rule.id); rule
+            // An existing rule keeps its place unless the caller moved it.
+            exec("UPDATE rule SET json = ?, sort_order = ? WHERE id = ?", json.encodeToString(MailRule.serializer(), rule.copy(order = sortOrder)), sortOrder, rule.id); rule.copy(order = sortOrder)
         }
     }
 
@@ -742,6 +743,9 @@ class MailStore(driver: SQLiteDriver, path: String, val text: dev.aarso.mail.sea
             "$p%", "$p%", "% $p%", limit,
         ) { Contact(it.text(0), it.textOrNull(1), it.int(2), it.int(3), it.long(4)) }
     }
+
+    /** Addresses the person has written to (lower-case): the "known contacts" a rule can test for. */
+    suspend fun knownAddresses(): Set<String> = db.read { query("SELECT address FROM contact WHERE sent_count > 0") { it.text(0) }.toHashSet() }
 
     suspend fun contact(address: String): Contact? = db.read {
         queryOne("SELECT address, name, sent_count, received_count, last_contact_at FROM contact WHERE address = ?", address.lowercase()) {

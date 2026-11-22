@@ -85,6 +85,7 @@ fun RuleAction.describe(): String = when (this) {
     RuleAction.Pin -> "pin"
     RuleAction.Mute -> "mute the conversation"
     is RuleAction.MoveTo -> "move to ${mailbox ?: role?.name?.lowercase() ?: "?"}"
+    is RuleAction.CopyTo -> "copy to ${mailbox ?: role?.name?.lowercase() ?: "?"}"
     is RuleAction.AddLabel -> "label “$label”"
     is RuleAction.RemoveLabel -> "remove label “$label”"
     is RuleAction.Categorize -> "put in ${category.label}"
