@@ -226,3 +226,7 @@ Parsing, the evaluator, scoring, natural-language rewriting, relative dates and 
 - **Did you mean.** When a search finds almost nothing, words that match no message are corrected against the index's own vocabulary (`fts5vocab`: one edit, two for long words, swaps of neighbouring letters count as one), so it knows names and jargon.
 - **Already there:** operators, boolean and regex, relative dates, relevance ranking with recency, typeahead, snippets, facets, saved views, server-side search for what isn't synced, query-backed select-all.
 Not done: text inside attachments (PDF, Office files) is not indexed; only attachment names are.
+
+## Licence
+
+Source-available, free for noncommercial use under the [PolyForm Noncommercial License 1.0.0](LICENSE) (SPDX: `PolyForm-Noncommercial-1.0.0`). Copyright 2026 Madhav Baliga. For commercial use, contact the copyright holder.
