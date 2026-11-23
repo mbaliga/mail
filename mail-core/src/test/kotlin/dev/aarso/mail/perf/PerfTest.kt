@@ -124,6 +124,24 @@ class PerfTest {
         time("select all matching: resolve ids", 400) { SelectionEngine(search).resolve(Selection.allMatching("in:inbox older_than:365d")) }
         time("facets: sender, category, account, year", 400) { search.facets(search.parse("in:inbox", natural = false)) }
         time("facet counts by category", 400) { search.groupCounts(search.parse("in:inbox", natural = false), SearchScope(), "m.category") }
+        // ---- rules: what the editor's "Matches N messages" line costs ----
+        val rules = dev.aarso.mail.rules.RuleEngine(store, search, dev.aarso.mail.sync.MailActions(store, Clock { now }), clock = Clock { now }, zone = ZoneId.of("UTC"))
+        fun rule(c: dev.aarso.mail.model.Condition) = dev.aarso.mail.model.MailRule(name = "perf", query = "", condition = c, actions = emptyList())
+        val old = "category:newsletters older_than:30d is:unread"
+        time("rule preview, before (query: search + count)", 300) { search.search(search.parse(old, natural = false), limit = 50).total }
+        time("rule preview: query only", 300) { rules.preview(rule(dev.aarso.mail.model.Condition.Query(old))) }
+        time("rule preview: query + age + size (all pushed down)", 300) {
+            rules.preview(rule(dev.aarso.mail.model.Condition.All(listOf(dev.aarso.mail.model.Condition.Query("category:finance"), dev.aarso.mail.model.Condition.AgeOver(30 * 24 * 60), dev.aarso.mail.model.Condition.SizeOver(100_000)))))
+        }
+        time("rule preview: mixed (query + header + reply)", 800) {
+            rules.preview(rule(dev.aarso.mail.model.Condition.All(listOf(dev.aarso.mail.model.Condition.Query("has:attachment older_than:30d"), dev.aarso.mail.model.Condition.Header("from", dev.aarso.mail.model.HeaderOp.CONTAINS, "person7"), dev.aarso.mail.model.Condition.Not(dev.aarso.mail.model.Condition.IsReply)))))
+        }
+        time("rule preview: any-of, one branch has no index (full scan)", 800) {
+            rules.preview(rule(dev.aarso.mail.model.Condition.AnyOf(listOf(dev.aarso.mail.model.Condition.Query("from:person7"), dev.aarso.mail.model.Condition.IsReply))))
+        }
+        time("rule preview: any-of with a header branch (narrowed)", 800) {
+            rules.preview(rule(dev.aarso.mail.model.Condition.AnyOf(listOf(dev.aarso.mail.model.Condition.Query("from:person7"), dev.aarso.mail.model.Condition.Header("subject", dev.aarso.mail.model.HeaderOp.CONTAINS, "flight")))))
+        }
         val ids = search.search(search.parse("in:inbox", natural = false), limit = 150).headers.map { it.id }
         time("matchesAmong 150 ids", 40) { search.matchesAmong(search.parse("is:unread", natural = false), ids.toSet()) }
         time("headers(150 ids)", 30) { store.headers(ids) }

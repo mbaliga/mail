@@ -168,6 +168,7 @@ class JmapClient(
             putJsonArray("using") {
                 add(JsonPrimitive(CORE)); add(JsonPrimitive(MAIL))
                 if (s.capabilities.contains(SUBMISSION)) add(JsonPrimitive(SUBMISSION))
+                if (s.capabilities.contains(SIEVE)) add(JsonPrimitive(SIEVE))
             }
             putJsonArray("methodCalls") {
                 for ((name, args, id) in calls) add(buildJsonArray { add(JsonPrimitive(name)); add(args); add(JsonPrimitive(id)) })
@@ -289,6 +290,59 @@ class JmapClient(
             }
             checkSet(call(Triple("Email/set", args, "d")).first().second)
         }
+    }
+
+    // ---- Sieve scripts (RFC 9661) ----
+
+    /** One stored script on a JMAP server; [isActive] means the server runs it. */
+    data class SieveScript(val id: String, val name: String?, val isActive: Boolean)
+
+    /** Does this server let a client manage Sieve scripts (`urn:ietf:params:jmap:sieve`)? */
+    suspend fun sieveSupported(): Boolean = SIEVE in session().capabilities
+
+    /** The Sieve extensions the server runs, from the capability's `sieveExtensions`; empty if it does not say. */
+    suspend fun sieveExtensions(): Set<String> = withContext(Dispatchers.IO) {
+        val s = session()
+        val root = json.parseToJsonElement(http.newCall(authorize(Request.Builder().url(sessionUrl).get()).build()).execute().use { resp -> checkOk(resp); resp.body!!.string() }).jsonObject
+        val cap = root["accounts"]?.jsonObject?.get(s.accountId)?.jsonObject?.get("accountCapabilities")?.jsonObject?.get(SIEVE)?.jsonObject
+        (cap?.get("sieveExtensions") as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.lowercase() }.toSet()
+    }
+
+    suspend fun sieveScripts(): List<SieveScript> {
+        val s = session()
+        val r = call(Triple("SieveScript/get", buildJsonObject { put("accountId", s.accountId); put("ids", JsonNull) }, "g")).first().second
+        return r["list"]?.jsonArray.orEmpty().map { e ->
+            val o = e.jsonObject
+            SieveScript(o.str("id").orEmpty(), o.str("name"), (o["isActive"] as? JsonPrimitive)?.booleanOrNull == true)
+        }
+    }
+
+    /**
+     * Store [text] under [name] — replacing the script with that name if there is one — and optionally make it the active one.
+     * A script the server rejects raises a [JmapException] carrying the server's own description.
+     */
+    suspend fun putSieveScript(name: String, text: String, activate: Boolean): String {
+        val s = session()
+        val existing = sieveScripts().firstOrNull { it.name == name }
+        val blob = upload(text.toByteArray(Charsets.UTF_8), "application/sieve")
+        val args = buildJsonObject {
+            put("accountId", s.accountId)
+            if (existing == null) {
+                put("create", buildJsonObject { put("script", buildJsonObject { put("name", name); put("blobId", blob) }) })
+                if (activate) put("onSuccessActivateScript", "#script")
+            } else {
+                put("update", buildJsonObject { put(existing.id, buildJsonObject { put("blobId", blob) }) })
+                if (activate && !existing.isActive) put("onSuccessActivateScript", existing.id)
+            }
+        }
+        val r = call(Triple("SieveScript/set", args, "s")).first().second
+        checkSet(r)
+        return existing?.id ?: r["created"]?.jsonObject?.get("script")?.jsonObject?.str("id").orEmpty()
+    }
+
+    suspend fun deactivateSieve() {
+        val s = session()
+        checkSet(call(Triple("SieveScript/set", buildJsonObject { put("accountId", s.accountId); put("onSuccessDeactivateScript", true) }, "d")).first().second)
     }
 
     private fun checkSet(r: JsonObject) {
@@ -481,6 +535,7 @@ class JmapClient(
         const val CORE = "urn:ietf:params:jmap:core"
         const val MAIL = "urn:ietf:params:jmap:mail"
         const val SUBMISSION = "urn:ietf:params:jmap:submission"
+        const val SIEVE = "urn:ietf:params:jmap:sieve"
         private val JSON_TYPE = "application/json".toMediaType()
         private val HEADER_PROPERTIES = listOf("List-Id", "List-Unsubscribe", "List-Unsubscribe-Post", "Precedence", "Auto-Submitted", "Authentication-Results")
         private val EMAIL_PROPERTIES = listOf(

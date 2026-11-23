@@ -35,6 +35,7 @@ object Work {
     private const val FLUSH = "flush"
     private const val OUTBOX = "outbox"
     private const val REMINDERS = "reminders"
+    private const val RULES = "rules.scheduled"
 
     private val online = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
 
@@ -75,6 +76,21 @@ object Work {
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(OUTBOX, ExistingWorkPolicy.REPLACE, req)
+    }
+
+    /**
+     * Scheduled rules ("every night, archive newsletters older than a week") get their own periodic job, waking as often as the
+     * shortest rule needs (15 minutes at the least), or not at all when no rule is scheduled. It never runs on a low battery,
+     * and [RuleWorker] sits a round out while Battery Saver is on.
+     */
+    fun scheduleRules(context: Context, everyMinutes: Int?) {
+        val wm = WorkManager.getInstance(context)
+        if (everyMinutes == null) { wm.cancelUniqueWork(RULES); return }
+        val req = PeriodicWorkRequestBuilder<RuleWorker>(everyMinutes.coerceAtLeast(15).toLong(), TimeUnit.MINUTES)
+            .setConstraints(Constraints.Builder().setRequiresBatteryNotLow(true).build())
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 5, TimeUnit.MINUTES)
+            .build()
+        wm.enqueueUniquePeriodicWork(RULES, ExistingPeriodicWorkPolicy.UPDATE, req)
     }
 
     fun remindAt(context: Context, at: Long) {
@@ -132,6 +148,16 @@ class OutboxWorker(context: Context, params: WorkerParameters) : CoroutineWorker
 class ReminderWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         applicationContext.graph.runReminders()
+        return Result.success()
+    }
+}
+
+/** Runs the scheduled rules that are due. Idempotent: "due" is read from each rule's own last-run time. */
+class RuleWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        val power = applicationContext.getSystemService(android.os.PowerManager::class.java)
+        if (power?.isPowerSaveMode == true) return Result.success() // Battery Saver: skip this round, the next one will catch up
+        applicationContext.graph.rules.runScheduled()
         return Result.success()
     }
 }

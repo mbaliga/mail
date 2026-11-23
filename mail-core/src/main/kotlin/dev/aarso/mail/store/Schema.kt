@@ -14,7 +14,7 @@ package dev.aarso.mail.store
  *    indexed query, and each carries its provenance.
  */
 object Schema {
-    const val VERSION = 3
+    const val VERSION = 4
 
     private val V1 = """
         CREATE TABLE IF NOT EXISTS account (
@@ -240,6 +240,11 @@ object Schema {
         }
         if (current < 3) {
             c.execScript(V3)
+        }
+        if (current < 4) {
+            // V4: rules v2 — rewrite each saved rule into the new shape (see RuleMigration); nothing is dropped.
+            val rows = c.query("SELECT id, json, sort_order FROM rule") { r -> Triple(r.long(0), r.text(1), r.long(2).toInt()) }
+            for ((id, j, order) in rows) c.exec("UPDATE rule SET json = ? WHERE id = ?", dev.aarso.mail.rules.RuleMigration.upgrade(j, order), id)
         }
         if (current != VERSION) c.execScript("PRAGMA user_version = $VERSION")
     }

@@ -280,10 +280,7 @@ class MailSearch(
         val c = ctx()
         val plan = plan(parsed, scope, c)
         val out = ArrayList<Long>()
-        if (plan.residual == null) {
-            store.forEachHeader(plan.where, plan.args) { out += it.id; out.size < max }
-            return out
-        }
+        if (plan.residual == null) return store.idsWhere(plan.where, plan.args, max)
         val pending = ArrayList<MessageHeader>(500)
         val all = ArrayList<MessageHeader>()
         store.forEachHeader(plan.where, plan.args) { h -> all += h; all.size < max * 4 }
@@ -400,6 +397,34 @@ class MailSearch(
     suspend fun matchesAmong(parsed: ParsedQuery, ids: Set<Long>): Set<Long> =
         if (ids.isEmpty()) emptySet() else ids(parsed, SearchScope(messageIds = ids)).toSet()
 
+
+
+    /**
+     * A snapshot matcher for rules: parses each query once and answers per message in memory, with the same
+     * registry the Find box uses. Full-text terms are checked against subject, sender and preview.
+     */
+    suspend fun queryMatcher(): dev.aarso.mail.rules.QueryMatcher {
+        refreshAccounts()
+        val boxes = mailboxMap()
+        val accts = accounts.associateBy { it.id }
+        val cache = java.util.concurrent.ConcurrentHashMap<String, ParsedQuery>()
+        val c = ctx()
+        return dev.aarso.mail.rules.QueryMatcher { q, h ->
+            val parsed = cache.getOrPut(q) { parse(q, natural = false) }
+            if (parsed.root == null) true else {
+                val item = MailItem(h, boxes[h.mailboxId], accts[h.accountId], null)
+                val doc = SearchDoc(
+                    id = DocId(h.id.toString()), timestampMillis = h.receivedAt,
+                    text = mapOf(
+                        FieldName("subject") to h.subject,
+                        FieldName("sender") to listOfNotNull(h.from?.name, h.from?.address).joinToString(" "),
+                        FieldName("body") to h.preview,
+                    ),
+                )
+                matcher.matches(item, doc, parsed, c)
+            }
+        }
+    }
 
     // ---- typo tolerance ----
 

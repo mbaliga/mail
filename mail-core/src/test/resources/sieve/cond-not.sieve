@@ -1,0 +1,3 @@
+if not anyof(header :contains "from" "alice", address :contains "sender" "alice") {
+    addflag "\\Flagged";
+}

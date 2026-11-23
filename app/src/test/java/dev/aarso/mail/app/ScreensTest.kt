@@ -1,5 +1,9 @@
 package dev.aarso.mail.app
 
+import androidx.compose.ui.test.performScrollTo
+import org.junit.Assert.assertFalse
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertCountEquals
 import dev.aarso.mail.app.ui.home.AssistantContent
 import org.junit.Assert.assertEquals
 import kotlinx.coroutines.flow.first
@@ -115,10 +119,15 @@ class ScreensTest {
         Triple("Stratechery", Category.NEWSLETTERS, "Ben Thompson on why aggregators win the AI distribution fight."),
     )
 
+    @org.junit.After
+    fun closeStore() { runCatching { graph.store.close() } }
+
     @Before
     fun seed() {
         val app = ApplicationProvider.getApplicationContext<Application>()
-        File(app.getDatabasePath("mail.db").path).delete()
+        // The database is three files in WAL mode. Deleting only the main one left the last test's -wal and -shm to be replayed
+        // onto the next test's brand-new database — the likely reason a seeded rule sometimes never showed up.
+        for (suffix in listOf("", "-wal", "-shm", "-journal")) File(app.getDatabasePath("mail.db").path + suffix).delete()
         // The provider strip drifts on its own; frozen here so captures stay still (the drift has its own test).
         android.provider.Settings.Global.putFloat(app.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 0f)
         androidx.work.testing.WorkManagerTestInitHelper.initializeTestWorkManager(app)
@@ -394,6 +403,84 @@ class ScreensTest {
 
     @Test fun settingsSearchSection() = show("settings-search", waitFor = "Up to date") {
         androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().background(Color.White).padding(24.dp)) { dev.aarso.mail.app.ui.settings.SearchSettings() }
+    }
+
+    @Test fun scheduledRulesGetAPeriodicJobThatFollowsThem() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val wm = androidx.work.WorkManager.getInstance(app)
+        dev.aarso.mail.app.platform.Work.scheduleRules(app, 60)
+        val queued = wm.getWorkInfosForUniqueWork("rules.scheduled").get()
+        assertEquals(1, queued.size); assertTrue(queued[0].state == androidx.work.WorkInfo.State.ENQUEUED)
+        dev.aarso.mail.app.platform.Work.scheduleRules(app, null)
+        assertTrue("no scheduled rules, no job", wm.getWorkInfosForUniqueWork("rules.scheduled").get().all { it.state == androidx.work.WorkInfo.State.CANCELLED })
+    }
+
+    private fun addServerAccount() = runBlocking {
+        graph.store.saveAccount(dev.aarso.mail.model.Account(email = "me@mailbox.org", displayName = "Me", providerId = "mailboxorg", protocol = IncomingProtocol.IMAP,
+            incoming = ServerEndpoint("imap.mailbox.org", 993, Security.SSL_TLS, "me@mailbox.org"), auth = AuthKind.PASSWORD, secret = SecretRef("t2")))
+    }
+
+    @Test fun ruleEditorEmpty() {
+        show("rule-editor-empty", waitFor = "When mail arrives") { dev.aarso.mail.app.ui.rules.RuleEditor(null) {} }
+        rule.onNodeWithText("+ Add condition").assertExists()
+        rule.onNodeWithText("+ Add action").assertExists()
+        rule.onAllNodesWithText("any of these", substring = true).assertCountEquals(0)      // groups appear only with a second condition
+        rule.onNodeWithText("Save").assertExists()
+    }
+
+    @Test fun ruleEditorGroup() {
+        val r = MailRule(name = "Old Acme mail", query = "", actions = listOf(RuleAction.Archive), condition = dev.aarso.mail.model.Condition.All(listOf(
+            dev.aarso.mail.model.Condition.Query("from:@acme.io"), dev.aarso.mail.model.Condition.AgeOver(14 * 24 * 60), dev.aarso.mail.model.Condition.Not(dev.aarso.mail.model.Condition.IsReply))))
+        show("rule-editor-group", waitFor = "all of these") { dev.aarso.mail.app.ui.rules.RuleEditor(r) {} }
+        rule.onNodeWithText("older than 2 weeks").assertExists()
+        rule.onNodeWithText("is a reply").assertExists()
+    }
+
+    @Test fun ruleEditorShowsAConflictInOneLine() {
+        runBlocking { graph.store.saveRule(MailRule(name = "Receipts", query = "from:@acme.io", actions = listOf(RuleAction.MoveTo(mailbox = "Receipts")))) }
+        val r = MailRule(name = "Finance", query = "from:@acme.io", actions = listOf(RuleAction.MoveTo(mailbox = "Finance")))
+        show("rule-editor-conflict", waitFor = "different folders") { dev.aarso.mail.app.ui.rules.RuleEditor(r) {} }
+        rule.onAllNodesWithText("different folders", substring = true).assertCountEquals(1)
+    }
+
+    @Test fun ruleEditorSaysWhyARuleStaysOnThePhone() {
+        addServerAccount()
+        val r = MailRule(name = "Newsletters", query = "category:newsletters", actions = listOf(RuleAction.Archive))
+        show("rule-editor-not-portable", waitFor = "Runs on this phone") { dev.aarso.mail.app.ui.rules.RuleEditor(r) {} }
+        rule.waitUntil(10_000) { rule.onAllNodesWithText("decided on this phone", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Runs on this phone").assertExists()
+    }
+
+    @Test fun ruleEditorSaysWhenTheServerCanDoIt() {
+        addServerAccount()
+        val r = MailRule(name = "Acme", query = "from:@acme.io", actions = listOf(RuleAction.Star))
+        show("rule-editor-server", waitFor = "Runs on the server") { dev.aarso.mail.app.ui.rules.RuleEditor(r) {} }
+        rule.onNodeWithText("Keep it on this phone").assertExists()
+    }
+
+    @Test fun theAssistantsRuleProposalOpensARealRuleInTheEditor() {
+        runBlocking {
+            graph.assistant.apply(listOf(dev.aarso.mail.ai.ProposedAction(dev.aarso.mail.ai.ActionKind.MAKE_RULE, "Archive Acme mail", query = "from:@acme.io", arg = "archive")), state)
+        }
+        val open = state.stack.last() as Screen.RuleEditor
+        val r = open.rule!!
+        assertEquals("from:@acme.io", r.query); assertEquals(listOf<RuleAction>(RuleAction.Archive), r.actions)
+        assertEquals(dev.aarso.mail.model.Trigger.OnArrival, r.trigger); assertEquals(dev.aarso.mail.model.Condition.Query("from:@acme.io"), r.effectiveCondition)
+        assertEquals(dev.aarso.mail.model.RunLocation.AUTO, r.runLocation); assertFalse(r.confirmed)
+        show("rule-editor-from-assistant", waitFor = "Archive Acme mail") { dev.aarso.mail.app.ui.rules.RuleEditor(r) {} }
+    }
+
+    @Test fun settingsSwitchesForTheSuggestionsAndTheAssistant() {
+        show("settings-switches", waitFor = "Offer what I just copied") { dev.aarso.mail.app.ui.settings.SettingsScreen {} }
+        assertTrue(graph.settings.value.suggestClipboard); assertTrue(graph.settings.value.assistantAuto); assertFalse(graph.settings.value.suggestScreenshots)
+        rule.onNodeWithText("Offer what I just copied").performScrollTo().performClick()
+        rule.waitUntil(5_000) { !graph.settings.value.suggestClipboard }
+        rule.onNodeWithText("Assistant looks through new mail by itself").performScrollTo().performClick()
+        rule.waitUntil(5_000) { !graph.settings.value.assistantAuto }
+        // The screenshot switch asks for photo access; the test bridge refuses, so it stays off and says why.
+        rule.onNodeWithText("Offer my latest screenshot").performScrollTo().performClick()
+        rule.waitForIdle()
+        assertFalse(graph.settings.value.suggestScreenshots)
     }
 
     @Test fun reader() = show("reader", waitFor = "refund") { ReaderScreen(firstId, emptyList()) {} }

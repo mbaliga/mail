@@ -21,6 +21,16 @@ class UndoToken internal constructor(
 )
 
 /**
+ * Several undo tokens as one: a rule that archives, stars and labels a thousand messages is undone by one tap.
+ * Each message is restored to how the *first* token found it.
+ */
+internal fun combineTokens(label: String, tokens: List<UndoToken>): UndoToken {
+    val before = LinkedHashMap<Long, MessageHeader>()
+    tokens.forEach { t -> t.before.forEach { before.putIfAbsent(it.id, it) } }
+    return UndoToken(label, before.size, tokens.flatMap { it.opIds }, before.values.toList())
+}
+
+/**
  * Every change a person (or a rule) makes to mail, in one place.
  *
  * Each action is applied to the local store at once — the list redraws in the same frame — and a
@@ -230,4 +240,9 @@ class MailActions(
 
     /** For rules and "select all": resolve an [Account] lookup once per batch. */
     suspend fun accountOf(h: MessageHeader): Account? = store.account(h.accountId)
+
+    companion object {
+        /** See [combineTokens]. */
+        fun combine(label: String, tokens: List<UndoToken>): UndoToken = combineTokens(label, tokens)
+    }
 }
