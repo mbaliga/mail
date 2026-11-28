@@ -39,7 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
-import dev.aarso.hyle.Pulse
+import com.asystemofcells.hyle.Pulse
 import dev.aarso.mail.app.ui.LocalApp
 import dev.aarso.mail.app.ui.Screen
 import dev.aarso.mail.app.ui.components.HyIcon

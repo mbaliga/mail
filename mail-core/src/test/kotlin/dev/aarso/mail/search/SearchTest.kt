@@ -223,7 +223,7 @@ class SearchTest {
     // ---- the rest of the search engineering ----
 
     /** A stand-in for the ICU word breaker the app injects: every ideograph is its own word. */
-    private val perIdeograph = dev.aarso.search.Segmenter.BoundarySource { text, _ ->
+    private val perIdeograph = com.asystemofcells.search.Segmenter.BoundarySource { text, _ ->
         val b = ArrayList<Int>(); b += 0
         for (i in 1 until text.length) if (Character.UnicodeScript.of(text[i].code) == Character.UnicodeScript.HAN || Character.UnicodeScript.of(text[i - 1].code) == Character.UnicodeScript.HAN || text[i].isWhitespace() || text[i - 1].isWhitespace()) b += i
         b += text.length; b.distinct()

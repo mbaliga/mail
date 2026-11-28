@@ -1,7 +1,7 @@
 package dev.aarso.mail.search
 
-import dev.aarso.search.QueryNode
-import dev.aarso.search.Segmenter
+import com.asystemofcells.search.QueryNode
+import com.asystemofcells.search.Segmenter
 import java.util.Locale
 
 /**

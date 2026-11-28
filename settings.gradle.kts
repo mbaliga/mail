@@ -25,16 +25,16 @@ dependencyResolutionManagement {
 rootProject.name = "YouveGotMail"
 
 // The constellation's sharing mechanism (Personal-Tracker DECISIONS.md D-A): each shared repo is a
-// git submodule pinned by this consumer, composited with includeBuild so `dev.aarso:*` coordinates
+// git submodule pinned by this consumer, composited with includeBuild so `com.asystemofcells:*` coordinates
 // resolve to source with no Maven registry involved.
 //
-// Hyle is substituted for `dev.aarso:hyle` ONLY. Its tree still carries the crash-recovery
-// tombstone at the same `dev.aarso:crash-recovery` coordinate that shared-libraries now owns
-// (shared-libraries MIGRATION.md); letting both builds offer it automatically makes the
-// coordinate ambiguous. Pinning Hyle's contribution explicitly leaves exactly one provider.
+// Hyle is substituted for `com.asystemofcells:hyle` ONLY. Its tree still carries the old
+// `dev.aarso:crash-recovery` tombstone (a different group since the 2026-11 move, so it can no
+// longer collide with shared-libraries' `com.asystemofcells:crash-recovery`); keeping Hyle's
+// contribution explicit leaves exactly one provider per coordinate regardless.
 includeBuild("hyle-design-system") {
     dependencySubstitution {
-        substitute(module("dev.aarso:hyle")).using(project(":hyle"))
+        substitute(module("com.asystemofcells:hyle")).using(project(":hyle"))
     }
 }
 includeBuild("shared-libraries")

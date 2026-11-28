@@ -18,8 +18,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.aarso.hyle.Provenance
-import dev.aarso.hyle.tokens.HyleTokens
+import com.asystemofcells.hyle.Provenance
+import com.asystemofcells.hyle.tokens.HyleTokens
 import dev.aarso.mail.app.R
 
 /**

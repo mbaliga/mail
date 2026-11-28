@@ -18,7 +18,7 @@ kotlin {
 
 dependencies {
     // The constellation's search engine: query grammar, facets, natural language, ranking.
-    api("dev.aarso:search-core:0.2.0")
+    api("com.asystemofcells:search-core:0.2.0")
     api(libs.kotlinx.coroutines.core)
     // KMP driver API (SQLiteDriver / SQLiteConnection / SQLiteStatement). The concrete driver is
     // injected: the bundled build on Android (for FTS5) and the bundled JVM build in tests.

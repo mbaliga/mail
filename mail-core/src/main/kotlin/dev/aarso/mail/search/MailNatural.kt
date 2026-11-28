@@ -1,11 +1,11 @@
 package dev.aarso.mail.search
 
 import dev.aarso.mail.model.Category
-import dev.aarso.search.NaturalVocabulary
+import com.asystemofcells.search.NaturalVocabulary
 
 /**
  * Mail-specific natural language, rewritten into the structured grammar *before* search-core's own
- * [dev.aarso.search.NaturalQuery] pass (which handles dates, sizes and kinds). After both passes a
+ * [com.asystemofcells.search.NaturalQuery] pass (which handles dates, sizes and kinds). After both passes a
  * spoken or typed "unread newsletters from substack older than 30 days" is exactly the query
  * `is:unread category:newsletters from:substack older_than:30d` — same chips, same diagnostics, same
  * round trip, so a person can see and edit what their words became.

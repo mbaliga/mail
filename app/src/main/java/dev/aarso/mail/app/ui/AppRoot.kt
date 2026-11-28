@@ -44,10 +44,10 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import dev.aarso.cellshell.RoomEdge
-import dev.aarso.cellshell.ShakeToRefresh
-import dev.aarso.cellshell.SpatialShell
-import dev.aarso.cellshell.rememberSpatialController
+import com.asystemofcells.cellshell.RoomEdge
+import com.asystemofcells.cellshell.ShakeToRefresh
+import com.asystemofcells.cellshell.SpatialShell
+import com.asystemofcells.cellshell.rememberSpatialController
 import dev.aarso.mail.app.Drafts
 import dev.aarso.mail.app.ui.accounts.AccountSetupScreen
 import dev.aarso.mail.app.ui.compose.ComposeScreen

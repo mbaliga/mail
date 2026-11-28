@@ -27,10 +27,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import dev.aarso.feedback.FeedbackDraft
-import dev.aarso.feedback.FeedbackFact
-import dev.aarso.feedback.FeedbackOptIn
-import dev.aarso.feedback.FeedbackShare
+import com.asystemofcells.feedback.FeedbackDraft
+import com.asystemofcells.feedback.FeedbackFact
+import com.asystemofcells.feedback.FeedbackOptIn
+import com.asystemofcells.feedback.FeedbackShare
 import dev.aarso.mail.app.BuildConfig
 import dev.aarso.mail.app.SwipeAction
 import dev.aarso.mail.app.platform.Work
@@ -176,7 +176,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             Text("IMAP, POP3, JMAP and SMTP, written for this app. Your mail and keys stay on this phone; cloud models see only what you allow.", style = Type.small.copy(color = Palette.SheetInkDim))
             Text("Typeface: Hyle Grotesk Classic (SIL Open Font License).", style = Type.small.copy(color = Palette.SheetInkDim), modifier = Modifier.padding(top = 4.dp))
             if (BuildConfig.DEBUG) TextAction("Preview the crash screen", Palette.Navy, {
-                bridge.launch(dev.aarso.crashrecovery.CrashRecovery.previewIntent(g.context, "You've got Mail").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                bridge.launch(com.asystemofcells.crashrecovery.CrashRecovery.previewIntent(g.context, "You've got Mail").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
             })
             Spacer(Modifier.height(40.dp))
         }

@@ -8,19 +8,19 @@ import dev.aarso.mail.model.MailboxRole
 import dev.aarso.mail.model.MessageHeader
 import dev.aarso.mail.store.MailStore
 import dev.aarso.mail.sync.Clock
-import dev.aarso.search.CoverageRecencyScorer
-import dev.aarso.search.Diagnostic
-import dev.aarso.search.EvalContext
-import dev.aarso.search.FacetEvaluator
-import dev.aarso.search.FieldName
-import dev.aarso.search.Matcher
-import dev.aarso.search.NaturalQuery
-import dev.aarso.search.ParsedQuery
-import dev.aarso.search.QueryCompiler
-import dev.aarso.search.QueryNode
-import dev.aarso.search.QueryParser
-import dev.aarso.search.SearchDoc
-import dev.aarso.search.DocId
+import com.asystemofcells.search.CoverageRecencyScorer
+import com.asystemofcells.search.Diagnostic
+import com.asystemofcells.search.EvalContext
+import com.asystemofcells.search.FacetEvaluator
+import com.asystemofcells.search.FieldName
+import com.asystemofcells.search.Matcher
+import com.asystemofcells.search.NaturalQuery
+import com.asystemofcells.search.ParsedQuery
+import com.asystemofcells.search.QueryCompiler
+import com.asystemofcells.search.QueryNode
+import com.asystemofcells.search.QueryParser
+import com.asystemofcells.search.SearchDoc
+import com.asystemofcells.search.DocId
 import java.time.ZoneId
 
 data class SearchScope(
@@ -120,9 +120,9 @@ class MailSearch(
         is QueryNode.Facet -> {
             val f = fields.facet(n.key)
             val bounds = n.rangeBounds
-            if (f != null && bounds != null && (f.valueKind == dev.aarso.search.FacetValueKind.DATE || f.valueKind == dev.aarso.search.FacetValueKind.NUMBER)) {
-                val lo = f.sql(dev.aarso.search.Op.GTE, bounds.first.trim(), c)
-                val hi = f.sql(dev.aarso.search.Op.LTE, bounds.second.trim(), c)
+            if (f != null && bounds != null && (f.valueKind == com.asystemofcells.search.FacetValueKind.DATE || f.valueKind == com.asystemofcells.search.FacetValueKind.NUMBER)) {
+                val lo = f.sql(com.asystemofcells.search.Op.GTE, bounds.first.trim(), c)
+                val hi = f.sql(com.asystemofcells.search.Op.LTE, bounds.second.trim(), c)
                 if (lo != null && hi != null) SqlPart("(${lo.sql}) AND (${hi.sql})", lo.args + hi.args, lo.exact && hi.exact) else null
             } else f?.sql(n.op, n.value.trim(), c)
         }
@@ -415,7 +415,7 @@ class MailSearch(
         val out = ArrayList<Correction>()
         val words = QueryCompiler.lexicalText(parsed.root).split(' ').filter { it.length >= 4 && it.all(Char::isLetter) }.distinct().take(4)
         for (w in words) {
-            val n = dev.aarso.search.Normalizer.normalize(w)
+            val n = com.asystemofcells.search.Normalizer.normalize(w)
             if (store.text.needsSegmentation(n) || n.isEmpty()) continue
             if (store.termCount(n) > 0) continue
             val limit = if (n.length >= 8) 2 else 1

@@ -108,10 +108,10 @@ dependencies {
     implementation(libs.play.feature.delivery.ktx)
 
     // The constellation.
-    implementation("dev.aarso:hyle:0.2.0")
-    implementation("dev.aarso:cell-shell:0.1.0")
-    implementation("dev.aarso:crash-recovery:1.4.0")
-    implementation("dev.aarso:feedback:0.1.0")
+    implementation("com.asystemofcells:hyle:0.2.0")
+    implementation("com.asystemofcells:cell-shell:0.1.0")
+    implementation("com.asystemofcells:crash-recovery:1.4.0")
+    implementation("com.asystemofcells:feedback:0.1.0")
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

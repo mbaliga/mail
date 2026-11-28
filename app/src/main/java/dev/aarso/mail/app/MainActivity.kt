@@ -24,7 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import dev.aarso.crashrecovery.CrashRecovery
+import com.asystemofcells.crashrecovery.CrashRecovery
 import dev.aarso.mail.app.platform.PushService
 import dev.aarso.mail.app.ui.ActivityBridge
 import dev.aarso.mail.app.ui.AppRoot

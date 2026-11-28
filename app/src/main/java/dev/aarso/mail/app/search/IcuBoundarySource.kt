@@ -1,6 +1,6 @@
 package dev.aarso.mail.app.search
 
-import dev.aarso.search.Segmenter
+import com.asystemofcells.search.Segmenter
 import java.util.Locale
 
 /**

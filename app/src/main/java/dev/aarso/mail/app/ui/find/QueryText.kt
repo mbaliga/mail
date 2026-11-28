@@ -1,6 +1,6 @@
 package dev.aarso.mail.app.ui.find
 
-import dev.aarso.search.Diagnostic
+import com.asystemofcells.search.Diagnostic
 
 /** The parser's notes, as a sentence beside the search box. */
 fun Diagnostic.explain(): String = when (this) {

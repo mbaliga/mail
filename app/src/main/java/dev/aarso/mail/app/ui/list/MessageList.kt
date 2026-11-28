@@ -58,8 +58,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.aarso.cellshell.EdgeTimelineScrubber
-import dev.aarso.cellshell.ScrubberStop
+import com.asystemofcells.cellshell.EdgeTimelineScrubber
+import com.asystemofcells.cellshell.ScrubberStop
 import dev.aarso.mail.app.SwipeAction
 import dev.aarso.mail.app.ui.LocalApp
 import dev.aarso.mail.app.ui.components.Hairline

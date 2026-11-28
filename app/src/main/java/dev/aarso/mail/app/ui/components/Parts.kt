@@ -66,8 +66,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.aarso.hyle.Provenance
-import dev.aarso.hyle.Pulse
+import com.asystemofcells.hyle.Provenance
+import com.asystemofcells.hyle.Pulse
 import dev.aarso.mail.app.ui.theme.LocalMetrics
 import dev.aarso.mail.app.ui.theme.Palette
 import dev.aarso.mail.app.ui.theme.Type

@@ -142,7 +142,7 @@ fun FindRoom(onOpen: (Screen) -> Unit) {
             val parsed = result?.parsed
             if (parsed != null && live.isNotEmpty()) {
                 val chips = parsed.chips
-                if (chips.size > 1 || chips.any { it.kind == dev.aarso.search.ChipKind.FACET }) {
+                if (chips.size > 1 || chips.any { it.kind == com.asystemofcells.search.ChipKind.FACET }) {
                     Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         for (c in chips) RoomChip(c.text, false, {
                             // Tap a chip to drop that part of the query.

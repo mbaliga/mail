@@ -13,7 +13,7 @@ import dev.aarso.mail.search.SearchScope
 import dev.aarso.mail.store.MailStore
 import dev.aarso.mail.sync.Clock
 import dev.aarso.mail.sync.MailActions
-import dev.aarso.search.Diagnostic
+import com.asystemofcells.search.Diagnostic
 
 /** Things a rule can cause that are not local state: sending mail, calling a model. Implemented by the app. */
 interface RuleEffects {

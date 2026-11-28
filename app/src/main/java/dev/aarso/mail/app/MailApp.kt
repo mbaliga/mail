@@ -1,7 +1,7 @@
 package dev.aarso.mail.app
 
 import android.app.Application
-import dev.aarso.crashrecovery.CrashRecovery
+import com.asystemofcells.crashrecovery.CrashRecovery
 import dev.aarso.mail.app.platform.Work
 
 open class MailApp : Application() {

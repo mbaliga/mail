@@ -24,8 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import dev.aarso.cellshell.WheelItem
-import dev.aarso.cellshell.WordWheelRail
+import com.asystemofcells.cellshell.WheelItem
+import com.asystemofcells.cellshell.WordWheelRail
 import dev.aarso.mail.app.ui.LocalApp
 import dev.aarso.mail.app.ui.Screen
 import dev.aarso.mail.app.ui.components.HyIcon

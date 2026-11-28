@@ -7,12 +7,12 @@ import dev.aarso.mail.model.Flags
 import dev.aarso.mail.model.Mailbox
 import dev.aarso.mail.model.MailboxRole
 import dev.aarso.mail.model.MessageHeader
-import dev.aarso.search.EvalContext
-import dev.aarso.search.FacetField
-import dev.aarso.search.FacetValueKind
-import dev.aarso.search.FieldRegistry
-import dev.aarso.search.Op
-import dev.aarso.search.RelativeDate
+import com.asystemofcells.search.EvalContext
+import com.asystemofcells.search.FacetField
+import com.asystemofcells.search.FacetValueKind
+import com.asystemofcells.search.FieldRegistry
+import com.asystemofcells.search.Op
+import com.asystemofcells.search.RelativeDate
 import java.time.ZoneId
 
 /** One message as search sees it: the header, the folder it is in, its account, and (lazily) its text. */

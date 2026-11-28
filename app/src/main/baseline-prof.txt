@@ -18,8 +18,8 @@ HSPLdev/aarso/mail/model/**->**(**)**
 Ldev/aarso/mail/model/**;
 HSPLdev/aarso/mail/intel/**->**(**)**
 Ldev/aarso/mail/intel/**;
-HSPLdev/aarso/search/**->**(**)**
-Ldev/aarso/search/**;
+HSPLcom/asystemofcells/search/**->**(**)**
+Lcom/asystemofcells/search/**;
 
 # The UI toolkit every frame runs through.
 HSPLandroidx/compose/runtime/**->**(**)**
